@@ -2559,7 +2559,9 @@ void __noreturn die_if_kernel(char *str, struct pt_regs *regs)
 	}
 	if (panic_on_oops)
 		panic("Fatal exception");
-	make_task_dead((regs->tstate & TSTATE_PRIV)? SIGKILL : SIGSEGV);
+	if (regs->tstate & TSTATE_PRIV)
+		do_exit(SIGKILL);
+	do_exit(SIGSEGV);
 }
 EXPORT_SYMBOL(die_if_kernel);
 
@@ -2857,6 +2859,8 @@ void __init trap_init(void)
 		     TI_PRE_COUNT != offsetof(struct thread_info,
 					      preempt_count) ||
 		     TI_NEW_CHILD != offsetof(struct thread_info, new_child) ||
+		     TI_CURRENT_DS != offsetof(struct thread_info,
+						current_ds) ||
 		     TI_KUNA_REGS != offsetof(struct thread_info,
 					      kern_una_regs) ||
 		     TI_KUNA_INSN != offsetof(struct thread_info,

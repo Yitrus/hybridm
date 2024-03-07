@@ -20,6 +20,13 @@
 
 #include "svcxdr.h"
 
+static inline loff_t
+s64_to_loff_t(__s64 offset)
+{
+	return (loff_t)offset;
+}
+
+
 static inline s64
 loff_t_to_s64(loff_t offset)
 {
@@ -63,6 +70,8 @@ static bool
 svcxdr_decode_lock(struct xdr_stream *xdr, struct nlm_lock *lock)
 {
 	struct file_lock *fl = &lock->fl;
+	u64 len, start;
+	s64 end;
 
 	if (!svcxdr_decode_string(xdr, &lock->caller, &lock->len))
 		return false;
@@ -72,14 +81,20 @@ svcxdr_decode_lock(struct xdr_stream *xdr, struct nlm_lock *lock)
 		return false;
 	if (xdr_stream_decode_u32(xdr, &lock->svid) < 0)
 		return false;
-	if (xdr_stream_decode_u64(xdr, &lock->lock_start) < 0)
+	if (xdr_stream_decode_u64(xdr, &start) < 0)
 		return false;
-	if (xdr_stream_decode_u64(xdr, &lock->lock_len) < 0)
+	if (xdr_stream_decode_u64(xdr, &len) < 0)
 		return false;
 
 	locks_init_lock(fl);
 	fl->fl_flags = FL_POSIX;
 	fl->fl_type  = F_RDLCK;
+	end = start + len - 1;
+	fl->fl_start = s64_to_loff_t(start);
+	if (len == 0 || end < 0)
+		fl->fl_end = OFFSET_MAX;
+	else
+		fl->fl_end = s64_to_loff_t(end);
 
 	return true;
 }
@@ -129,131 +144,136 @@ svcxdr_encode_testrply(struct xdr_stream *xdr, const struct nlm_res *resp)
  * Decode Call arguments
  */
 
-bool
-nlm4svc_decode_void(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+int
+nlm4svc_decode_void(struct svc_rqst *rqstp, __be32 *p)
 {
-	return true;
+	return 1;
 }
 
-bool
-nlm4svc_decode_testargs(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+int
+nlm4svc_decode_testargs(struct svc_rqst *rqstp, __be32 *p)
 {
+	struct xdr_stream *xdr = &rqstp->rq_arg_stream;
 	struct nlm_args *argp = rqstp->rq_argp;
 	u32 exclusive;
 
 	if (!svcxdr_decode_cookie(xdr, &argp->cookie))
-		return false;
+		return 0;
 	if (xdr_stream_decode_bool(xdr, &exclusive) < 0)
-		return false;
+		return 0;
 	if (!svcxdr_decode_lock(xdr, &argp->lock))
-		return false;
+		return 0;
 	if (exclusive)
 		argp->lock.fl.fl_type = F_WRLCK;
 
-	return true;
+	return 1;
 }
 
-bool
-nlm4svc_decode_lockargs(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+int
+nlm4svc_decode_lockargs(struct svc_rqst *rqstp, __be32 *p)
 {
+	struct xdr_stream *xdr = &rqstp->rq_arg_stream;
 	struct nlm_args *argp = rqstp->rq_argp;
 	u32 exclusive;
 
 	if (!svcxdr_decode_cookie(xdr, &argp->cookie))
-		return false;
+		return 0;
 	if (xdr_stream_decode_bool(xdr, &argp->block) < 0)
-		return false;
+		return 0;
 	if (xdr_stream_decode_bool(xdr, &exclusive) < 0)
-		return false;
+		return 0;
 	if (!svcxdr_decode_lock(xdr, &argp->lock))
-		return false;
+		return 0;
 	if (exclusive)
 		argp->lock.fl.fl_type = F_WRLCK;
 	if (xdr_stream_decode_bool(xdr, &argp->reclaim) < 0)
-		return false;
+		return 0;
 	if (xdr_stream_decode_u32(xdr, &argp->state) < 0)
-		return false;
+		return 0;
 	argp->monitor = 1;		/* monitor client by default */
 
-	return true;
+	return 1;
 }
 
-bool
-nlm4svc_decode_cancargs(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+int
+nlm4svc_decode_cancargs(struct svc_rqst *rqstp, __be32 *p)
 {
+	struct xdr_stream *xdr = &rqstp->rq_arg_stream;
 	struct nlm_args *argp = rqstp->rq_argp;
 	u32 exclusive;
 
 	if (!svcxdr_decode_cookie(xdr, &argp->cookie))
-		return false;
+		return 0;
 	if (xdr_stream_decode_bool(xdr, &argp->block) < 0)
-		return false;
+		return 0;
 	if (xdr_stream_decode_bool(xdr, &exclusive) < 0)
-		return false;
+		return 0;
 	if (!svcxdr_decode_lock(xdr, &argp->lock))
-		return false;
+		return 0;
 	if (exclusive)
 		argp->lock.fl.fl_type = F_WRLCK;
-
-	return true;
+	return 1;
 }
 
-bool
-nlm4svc_decode_unlockargs(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+int
+nlm4svc_decode_unlockargs(struct svc_rqst *rqstp, __be32 *p)
 {
+	struct xdr_stream *xdr = &rqstp->rq_arg_stream;
 	struct nlm_args *argp = rqstp->rq_argp;
 
 	if (!svcxdr_decode_cookie(xdr, &argp->cookie))
-		return false;
+		return 0;
 	if (!svcxdr_decode_lock(xdr, &argp->lock))
-		return false;
+		return 0;
 	argp->lock.fl.fl_type = F_UNLCK;
 
-	return true;
+	return 1;
 }
 
-bool
-nlm4svc_decode_res(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+int
+nlm4svc_decode_res(struct svc_rqst *rqstp, __be32 *p)
 {
+	struct xdr_stream *xdr = &rqstp->rq_arg_stream;
 	struct nlm_res *resp = rqstp->rq_argp;
 
 	if (!svcxdr_decode_cookie(xdr, &resp->cookie))
-		return false;
+		return 0;
 	if (!svcxdr_decode_stats(xdr, &resp->status))
-		return false;
+		return 0;
 
-	return true;
+	return 1;
 }
 
-bool
-nlm4svc_decode_reboot(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+int
+nlm4svc_decode_reboot(struct svc_rqst *rqstp, __be32 *p)
 {
+	struct xdr_stream *xdr = &rqstp->rq_arg_stream;
 	struct nlm_reboot *argp = rqstp->rq_argp;
-	__be32 *p;
 	u32 len;
 
 	if (xdr_stream_decode_u32(xdr, &len) < 0)
-		return false;
+		return 0;
 	if (len > SM_MAXSTRLEN)
-		return false;
+		return 0;
 	p = xdr_inline_decode(xdr, len);
 	if (!p)
-		return false;
+		return 0;
 	argp->len = len;
 	argp->mon = (char *)p;
 	if (xdr_stream_decode_u32(xdr, &argp->state) < 0)
-		return false;
+		return 0;
 	p = xdr_inline_decode(xdr, SM_PRIV_SIZE);
 	if (!p)
-		return false;
+		return 0;
 	memcpy(&argp->priv.data, p, sizeof(argp->priv.data));
 
-	return true;
+	return 1;
 }
 
-bool
-nlm4svc_decode_shareargs(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+int
+nlm4svc_decode_shareargs(struct svc_rqst *rqstp, __be32 *p)
 {
+	struct xdr_stream *xdr = &rqstp->rq_arg_stream;
 	struct nlm_args *argp = rqstp->rq_argp;
 	struct nlm_lock	*lock = &argp->lock;
 
@@ -262,34 +282,35 @@ nlm4svc_decode_shareargs(struct svc_rqst *rqstp, struct xdr_stream *xdr)
 	lock->svid = ~(u32)0;
 
 	if (!svcxdr_decode_cookie(xdr, &argp->cookie))
-		return false;
+		return 0;
 	if (!svcxdr_decode_string(xdr, &lock->caller, &lock->len))
-		return false;
+		return 0;
 	if (!svcxdr_decode_fhandle(xdr, &lock->fh))
-		return false;
+		return 0;
 	if (!svcxdr_decode_owner(xdr, &lock->oh))
-		return false;
+		return 0;
 	/* XXX: Range checks are missing in the original code */
 	if (xdr_stream_decode_u32(xdr, &argp->fsm_mode) < 0)
-		return false;
+		return 0;
 	if (xdr_stream_decode_u32(xdr, &argp->fsm_access) < 0)
-		return false;
+		return 0;
 
-	return true;
+	return 1;
 }
 
-bool
-nlm4svc_decode_notify(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+int
+nlm4svc_decode_notify(struct svc_rqst *rqstp, __be32 *p)
 {
+	struct xdr_stream *xdr = &rqstp->rq_arg_stream;
 	struct nlm_args *argp = rqstp->rq_argp;
 	struct nlm_lock	*lock = &argp->lock;
 
 	if (!svcxdr_decode_string(xdr, &lock->caller, &lock->len))
-		return false;
+		return 0;
 	if (xdr_stream_decode_u32(xdr, &argp->state) < 0)
-		return false;
+		return 0;
 
-	return true;
+	return 1;
 }
 
 
@@ -297,42 +318,45 @@ nlm4svc_decode_notify(struct svc_rqst *rqstp, struct xdr_stream *xdr)
  * Encode Reply results
  */
 
-bool
-nlm4svc_encode_void(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+int
+nlm4svc_encode_void(struct svc_rqst *rqstp, __be32 *p)
 {
-	return true;
+	return 1;
 }
 
-bool
-nlm4svc_encode_testres(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+int
+nlm4svc_encode_testres(struct svc_rqst *rqstp, __be32 *p)
 {
+	struct xdr_stream *xdr = &rqstp->rq_res_stream;
 	struct nlm_res *resp = rqstp->rq_resp;
 
 	return svcxdr_encode_cookie(xdr, &resp->cookie) &&
 		svcxdr_encode_testrply(xdr, resp);
 }
 
-bool
-nlm4svc_encode_res(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+int
+nlm4svc_encode_res(struct svc_rqst *rqstp, __be32 *p)
 {
+	struct xdr_stream *xdr = &rqstp->rq_res_stream;
 	struct nlm_res *resp = rqstp->rq_resp;
 
 	return svcxdr_encode_cookie(xdr, &resp->cookie) &&
 		svcxdr_encode_stats(xdr, resp->status);
 }
 
-bool
-nlm4svc_encode_shareres(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+int
+nlm4svc_encode_shareres(struct svc_rqst *rqstp, __be32 *p)
 {
+	struct xdr_stream *xdr = &rqstp->rq_res_stream;
 	struct nlm_res *resp = rqstp->rq_resp;
 
 	if (!svcxdr_encode_cookie(xdr, &resp->cookie))
-		return false;
+		return 0;
 	if (!svcxdr_encode_stats(xdr, resp->status))
-		return false;
+		return 0;
 	/* sequence */
 	if (xdr_stream_encode_u32(xdr, 0) < 0)
-		return false;
+		return 0;
 
-	return true;
+	return 1;
 }

@@ -176,28 +176,22 @@ nlm_delete_file(struct nlm_file *file)
 	}
 }
 
-static int nlm_unlock_files(struct nlm_file *file, const struct file_lock *fl)
+static int nlm_unlock_files(struct nlm_file *file)
 {
 	struct file_lock lock;
+	struct file *f;
 
-	locks_init_lock(&lock);
 	lock.fl_type  = F_UNLCK;
 	lock.fl_start = 0;
 	lock.fl_end   = OFFSET_MAX;
-	lock.fl_owner = fl->fl_owner;
-	lock.fl_pid   = fl->fl_pid;
-	lock.fl_flags = FL_POSIX;
-
-	lock.fl_file = file->f_file[O_RDONLY];
-	if (lock.fl_file && vfs_lock_file(lock.fl_file, F_SETLK, &lock, NULL))
-		goto out_err;
-	lock.fl_file = file->f_file[O_WRONLY];
-	if (lock.fl_file && vfs_lock_file(lock.fl_file, F_SETLK, &lock, NULL))
-		goto out_err;
+	for (f = file->f_file[0]; f <= file->f_file[1]; f++) {
+		if (f && vfs_lock_file(f, F_SETLK, &lock, NULL) < 0) {
+			pr_warn("lockd: unlock failure in %s:%d\n",
+				__FILE__, __LINE__);
+			return 1;
+		}
+	}
 	return 0;
-out_err:
-	pr_warn("lockd: unlock failure in %s:%d\n", __FILE__, __LINE__);
-	return 1;
 }
 
 /*
@@ -210,7 +204,7 @@ nlm_traverse_locks(struct nlm_host *host, struct nlm_file *file,
 {
 	struct inode	 *inode = nlmsvc_file_inode(file);
 	struct file_lock *fl;
-	struct file_lock_context *flctx = locks_inode_context(inode);
+	struct file_lock_context *flctx = inode->i_flctx;
 	struct nlm_host	 *lockhost;
 
 	if (!flctx || list_empty_careful(&flctx->flc_posix))
@@ -229,7 +223,7 @@ again:
 		if (match(lockhost, host)) {
 
 			spin_unlock(&flctx->flc_lock);
-			if (nlm_unlock_files(file, fl))
+			if (nlm_unlock_files(file))
 				return 1;
 			goto again;
 		}
@@ -265,7 +259,7 @@ nlm_file_inuse(struct nlm_file *file)
 {
 	struct inode	 *inode = nlmsvc_file_inode(file);
 	struct file_lock *fl;
-	struct file_lock_context *flctx = locks_inode_context(inode);
+	struct file_lock_context *flctx = inode->i_flctx;
 
 	if (file->f_count || !list_empty(&file->f_blocks) || file->f_shares)
 		return 1;
@@ -286,10 +280,11 @@ nlm_file_inuse(struct nlm_file *file)
 
 static void nlm_close_files(struct nlm_file *file)
 {
-	if (file->f_file[O_RDONLY])
-		nlmsvc_ops->fclose(file->f_file[O_RDONLY]);
-	if (file->f_file[O_WRONLY])
-		nlmsvc_ops->fclose(file->f_file[O_WRONLY]);
+	struct file *f;
+
+	for (f = file->f_file[0]; f <= file->f_file[1]; f++)
+		if (f)
+			nlmsvc_ops->fclose(f);
 }
 
 /*

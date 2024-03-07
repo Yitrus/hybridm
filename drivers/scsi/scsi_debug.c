@@ -7,7 +7,7 @@
  *  anything out of the ordinary is seen.
  * ^^^^^^^^^^^^^^^^^^^^^^^ Original ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  *
- * Copyright (C) 2001 - 2021 Douglas Gilbert
+ * Copyright (C) 2001 - 2020 Douglas Gilbert
  *
  *  For documentation see http://sg.danny.cz/sg/scsi_debug.html
  */
@@ -16,13 +16,14 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ":%s: " fmt, __func__
 
 #include <linux/module.h>
-#include <linux/align.h>
+
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/jiffies.h>
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/string.h>
+#include <linux/genhd.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/proc_fs.h>
@@ -59,8 +60,8 @@
 #include "scsi_logging.h"
 
 /* make sure inq_product_rev string corresponds to this version */
-#define SDEBUG_VERSION "0191"	/* format to fit INQUIRY revision field */
-static const char *sdebug_version_date = "20210520";
+#define SDEBUG_VERSION "0190"	/* format to fit INQUIRY revision field */
+static const char *sdebug_version_date = "20200710";
 
 #define MY_NAME "scsi_debug"
 
@@ -82,7 +83,6 @@ static const char *sdebug_version_date = "20210520";
 #define INSUFF_RES_ASC 0x55
 #define INSUFF_RES_ASCQ 0x3
 #define POWER_ON_RESET_ASCQ 0x0
-#define POWER_ON_OCCURRED_ASCQ 0x1
 #define BUS_RESET_ASCQ 0x2	/* scsi bus reset occurred */
 #define MODE_CHANGED_ASCQ 0x1	/* mode parameters changed */
 #define CAPACITY_CHANGED_ASCQ 0x9
@@ -98,7 +98,6 @@ static const char *sdebug_version_date = "20210520";
 #define WRITE_BOUNDARY_ASCQ 0x5
 #define READ_INVDATA_ASCQ 0x6
 #define READ_BOUNDARY_ASCQ 0x7
-#define ATTEMPT_ACCESS_GAP 0x9
 #define INSUFF_ZONE_ASCQ 0xe
 
 /* Additional Sense Code Qualifier (ASCQ) */
@@ -174,7 +173,7 @@ static const char *sdebug_version_date = "20210520";
 #define SDEBUG_OPT_MAC_TIMEOUT		128
 #define SDEBUG_OPT_SHORT_TRANSFER	0x100
 #define SDEBUG_OPT_Q_NOISE		0x200
-#define SDEBUG_OPT_ALL_TSF		0x400	/* ignore */
+#define SDEBUG_OPT_ALL_TSF		0x400
 #define SDEBUG_OPT_RARE_TSF		0x800
 #define SDEBUG_OPT_N_WCE		0x1000
 #define SDEBUG_OPT_RESET_NOISE		0x2000
@@ -197,14 +196,13 @@ static const char *sdebug_version_date = "20210520";
  * priority. The UA numbers should be a sequence starting from 0 with
  * SDEBUG_NUM_UAS being 1 higher than the highest numbered UA. */
 #define SDEBUG_UA_POR 0		/* Power on, reset, or bus device reset */
-#define SDEBUG_UA_POOCCUR 1	/* Power on occurred */
-#define SDEBUG_UA_BUS_RESET 2
-#define SDEBUG_UA_MODE_CHANGED 3
-#define SDEBUG_UA_CAPACITY_CHANGED 4
-#define SDEBUG_UA_LUNS_CHANGED 5
-#define SDEBUG_UA_MICROCODE_CHANGED 6	/* simulate firmware change */
-#define SDEBUG_UA_MICROCODE_CHANGED_WO_RESET 7
-#define SDEBUG_NUM_UAS 8
+#define SDEBUG_UA_BUS_RESET 1
+#define SDEBUG_UA_MODE_CHANGED 2
+#define SDEBUG_UA_CAPACITY_CHANGED 3
+#define SDEBUG_UA_LUNS_CHANGED 4
+#define SDEBUG_UA_MICROCODE_CHANGED 5	/* simulate firmware change */
+#define SDEBUG_UA_MICROCODE_CHANGED_WO_RESET 6
+#define SDEBUG_NUM_UAS 7
 
 /* when 1==SDEBUG_OPT_MEDIUM_ERR, a medium error is simulated at this
  * sector on read commands: */
@@ -252,11 +250,9 @@ static const char *sdebug_version_date = "20210520";
 
 /* Zone types (zbcr05 table 25) */
 enum sdebug_z_type {
-	ZBC_ZTYPE_CNV	= 0x1,
-	ZBC_ZTYPE_SWR	= 0x2,
-	ZBC_ZTYPE_SWP	= 0x3,
-	/* ZBC_ZTYPE_SOBR = 0x4, */
-	ZBC_ZTYPE_GAP	= 0x5,
+	ZBC_ZONE_TYPE_CNV	= 0x1,
+	ZBC_ZONE_TYPE_SWR	= 0x2,
+	ZBC_ZONE_TYPE_SWP	= 0x3,
 };
 
 /* enumeration names taken from table 26, zbcr05 */
@@ -294,12 +290,10 @@ struct sdebug_dev_info {
 
 	/* For ZBC devices */
 	enum blk_zoned_model zmodel;
-	unsigned int zcap;
 	unsigned int zsize;
 	unsigned int zsize_shift;
 	unsigned int nr_zones;
 	unsigned int nr_conv_zones;
-	unsigned int nr_seq_zones;
 	unsigned int nr_imp_open;
 	unsigned int nr_exp_open;
 	unsigned int nr_closed;
@@ -787,7 +781,6 @@ static bool sdebug_clustering;
 static bool sdebug_host_lock = DEF_HOST_LOCK;
 static bool sdebug_strict = DEF_STRICT;
 static bool sdebug_any_injecting_opt;
-static bool sdebug_no_rwlock;
 static bool sdebug_verbose;
 static bool have_dif_prot;
 static bool write_since_sync;
@@ -834,7 +827,6 @@ static int dif_errors;
 
 /* ZBC global data */
 static bool sdeb_zbc_in_use;	/* true for host-aware and host-managed disks */
-static int sdeb_zbc_zone_cap_mb;
 static int sdeb_zbc_zone_size_mb;
 static int sdeb_zbc_max_open = DEF_ZBC_MAX_OPEN_ZONES;
 static int sdeb_zbc_nr_conv = DEF_ZBC_NR_CONV_ZONES;
@@ -865,7 +857,7 @@ static const int illegal_condition_result =
 	(DID_ABORT << 16) | SAM_STAT_CHECK_CONDITION;
 
 static const int device_qfull_result =
-	(DID_ABORT << 16) | SAM_STAT_TASK_SET_FULL;
+	(DID_OK << 16) | SAM_STAT_TASK_SET_FULL;
 
 static const int condition_met_result = SAM_STAT_CONDITION_MET;
 
@@ -1089,12 +1081,6 @@ static int make_ua(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 					POWER_ON_RESET_ASCQ);
 			if (sdebug_verbose)
 				cp = "power on reset";
-			break;
-		case SDEBUG_UA_POOCCUR:
-			mk_sense_buffer(scp, UNIT_ATTENTION, UA_RESET_ASC,
-					POWER_ON_OCCURRED_ASCQ);
-			if (sdebug_verbose)
-				cp = "power on occurred";
 			break;
 		case SDEBUG_UA_BUS_RESET:
 			mk_sense_buffer(scp, UNIT_ATTENTION, UA_RESET_ASC,
@@ -1511,6 +1497,8 @@ static int inquiry_vpd_b0(unsigned char *arr)
 	put_unaligned_be64(sdebug_write_same_length, &arr[32]);
 
 	return 0x3c; /* Mandatory page length for Logical Block Provisioning */
+
+	return sizeof(vpdb0_data);
 }
 
 /* Block device characteristics VPD page (SBC-3) */
@@ -1563,12 +1551,6 @@ static int inquiry_vpd_b6(struct sdebug_dev_info *devip, unsigned char *arr)
 		put_unaligned_be32(devip->max_open, &arr[12]);
 	else
 		put_unaligned_be32(0xffffffff, &arr[12]);
-	if (devip->zcap < devip->zsize) {
-		arr[19] = ZBC_CONSTANT_ZONE_START_OFFSET;
-		put_unaligned_be64(devip->zsize, &arr[20]);
-	} else {
-		arr[19] = 0;
-	}
 	return 0x3c;
 }
 
@@ -1896,13 +1878,6 @@ static int resp_readcap16(struct scsi_cmnd *scp,
 		if (sdebug_lbprz & 1)	/* precisely what the draft requires */
 			arr[14] |= 0x40;
 	}
-
-	/*
-	 * Since the scsi_debug READ CAPACITY implementation always reports the
-	 * total disk capacity, set RC BASIS = 1 for host-managed ZBC devices.
-	 */
-	if (devip->zmodel == BLK_ZONED_HM)
-		arr[12] |= 1 << 4;
 
 	arr[15] = sdebug_lowest_aligned & 0xff;
 
@@ -2606,18 +2581,6 @@ static int resp_ie_l_pg(unsigned char *arr)
 	return sizeof(ie_l_pg);
 }
 
-static int resp_env_rep_l_spg(unsigned char *arr)
-{
-	unsigned char env_rep_l_spg[] = {0x0, 0x0, 0x23, 0x8,
-					 0x0, 40, 72, 0xff, 45, 18, 0, 0,
-					 0x1, 0x0, 0x23, 0x8,
-					 0x0, 55, 72, 35, 55, 45, 0, 0,
-		};
-
-	memcpy(arr, env_rep_l_spg, sizeof(env_rep_l_spg));
-	return sizeof(env_rep_l_spg);
-}
-
 #define SDEBUG_MAX_LSENSE_SZ 512
 
 static int resp_log_sense(struct scsi_cmnd *scp,
@@ -2670,44 +2633,23 @@ static int resp_log_sense(struct scsi_cmnd *scp,
 			arr[n++] = 0xff;	/* this page */
 			arr[n++] = 0xd;
 			arr[n++] = 0x0;		/* Temperature */
-			arr[n++] = 0xd;
-			arr[n++] = 0x1;		/* Environment reporting */
-			arr[n++] = 0xd;
-			arr[n++] = 0xff;	/* all 0xd subpages */
 			arr[n++] = 0x2f;
 			arr[n++] = 0x0;	/* Informational exceptions */
-			arr[n++] = 0x2f;
-			arr[n++] = 0xff;	/* all 0x2f subpages */
 			arr[3] = n - 4;
 			break;
 		case 0xd:	/* Temperature subpages */
 			n = 4;
 			arr[n++] = 0xd;
 			arr[n++] = 0x0;		/* Temperature */
-			arr[n++] = 0xd;
-			arr[n++] = 0x1;		/* Environment reporting */
-			arr[n++] = 0xd;
-			arr[n++] = 0xff;	/* these subpages */
 			arr[3] = n - 4;
 			break;
 		case 0x2f:	/* Informational exceptions subpages */
 			n = 4;
 			arr[n++] = 0x2f;
 			arr[n++] = 0x0;		/* Informational exceptions */
-			arr[n++] = 0x2f;
-			arr[n++] = 0xff;	/* these subpages */
 			arr[3] = n - 4;
 			break;
 		default:
-			mk_sense_invalid_fld(scp, SDEB_IN_CDB, 2, 5);
-			return check_condition_result;
-		}
-	} else if (subpcode > 0) {
-		arr[0] |= 0x40;
-		arr[1] = subpcode;
-		if (pcode == 0xd && subpcode == 1)
-			arr[3] = resp_env_rep_l_spg(arr + 4);
-		else {
 			mk_sense_invalid_fld(scp, SDEB_IN_CDB, 2, 5);
 			return check_condition_result;
 		}
@@ -2728,38 +2670,12 @@ static inline bool sdebug_dev_is_zoned(struct sdebug_dev_info *devip)
 static struct sdeb_zone_state *zbc_zone(struct sdebug_dev_info *devip,
 					unsigned long long lba)
 {
-	u32 zno = lba >> devip->zsize_shift;
-	struct sdeb_zone_state *zsp;
-
-	if (devip->zcap == devip->zsize || zno < devip->nr_conv_zones)
-		return &devip->zstate[zno];
-
-	/*
-	 * If the zone capacity is less than the zone size, adjust for gap
-	 * zones.
-	 */
-	zno = 2 * zno - devip->nr_conv_zones;
-	WARN_ONCE(zno >= devip->nr_zones, "%u > %u\n", zno, devip->nr_zones);
-	zsp = &devip->zstate[zno];
-	if (lba >= zsp->z_start + zsp->z_size)
-		zsp++;
-	WARN_ON_ONCE(lba >= zsp->z_start + zsp->z_size);
-	return zsp;
+	return &devip->zstate[lba >> devip->zsize_shift];
 }
 
 static inline bool zbc_zone_is_conv(struct sdeb_zone_state *zsp)
 {
-	return zsp->z_type == ZBC_ZTYPE_CNV;
-}
-
-static inline bool zbc_zone_is_gap(struct sdeb_zone_state *zsp)
-{
-	return zsp->z_type == ZBC_ZTYPE_GAP;
-}
-
-static inline bool zbc_zone_is_seq(struct sdeb_zone_state *zsp)
-{
-	return !zbc_zone_is_conv(zsp) && !zbc_zone_is_gap(zsp);
+	return zsp->z_type == ZBC_ZONE_TYPE_CNV;
 }
 
 static void zbc_close_zone(struct sdebug_dev_info *devip,
@@ -2767,7 +2683,7 @@ static void zbc_close_zone(struct sdebug_dev_info *devip,
 {
 	enum sdebug_z_cond zc;
 
-	if (!zbc_zone_is_seq(zsp))
+	if (zbc_zone_is_conv(zsp))
 		return;
 
 	zc = zsp->z_cond;
@@ -2805,7 +2721,7 @@ static void zbc_open_zone(struct sdebug_dev_info *devip,
 {
 	enum sdebug_z_cond zc;
 
-	if (!zbc_zone_is_seq(zsp))
+	if (zbc_zone_is_conv(zsp))
 		return;
 
 	zc = zsp->z_cond;
@@ -2831,37 +2747,19 @@ static void zbc_open_zone(struct sdebug_dev_info *devip,
 	}
 }
 
-static inline void zbc_set_zone_full(struct sdebug_dev_info *devip,
-				     struct sdeb_zone_state *zsp)
-{
-	switch (zsp->z_cond) {
-	case ZC2_IMPLICIT_OPEN:
-		devip->nr_imp_open--;
-		break;
-	case ZC3_EXPLICIT_OPEN:
-		devip->nr_exp_open--;
-		break;
-	default:
-		WARN_ONCE(true, "Invalid zone %llu condition %x\n",
-			  zsp->z_start, zsp->z_cond);
-		break;
-	}
-	zsp->z_cond = ZC5_FULL;
-}
-
 static void zbc_inc_wp(struct sdebug_dev_info *devip,
 		       unsigned long long lba, unsigned int num)
 {
 	struct sdeb_zone_state *zsp = zbc_zone(devip, lba);
 	unsigned long long n, end, zend = zsp->z_start + zsp->z_size;
 
-	if (!zbc_zone_is_seq(zsp))
+	if (zbc_zone_is_conv(zsp))
 		return;
 
-	if (zsp->z_type == ZBC_ZTYPE_SWR) {
+	if (zsp->z_type == ZBC_ZONE_TYPE_SWR) {
 		zsp->z_wp += num;
 		if (zsp->z_wp >= zend)
-			zbc_set_zone_full(devip, zsp);
+			zsp->z_cond = ZC5_FULL;
 		return;
 	}
 
@@ -2880,7 +2778,7 @@ static void zbc_inc_wp(struct sdebug_dev_info *devip,
 			n = num;
 		}
 		if (zsp->z_wp >= zend)
-			zbc_set_zone_full(devip, zsp);
+			zsp->z_cond = ZC5_FULL;
 
 		num -= n;
 		lba += n;
@@ -2903,20 +2801,15 @@ static int check_zbc_access_params(struct scsi_cmnd *scp,
 		if (devip->zmodel == BLK_ZONED_HA)
 			return 0;
 		/* For host-managed, reads cannot cross zone types boundaries */
-		if (zsp->z_type != zsp_end->z_type) {
+		if (zsp_end != zsp &&
+		    zbc_zone_is_conv(zsp) &&
+		    !zbc_zone_is_conv(zsp_end)) {
 			mk_sense_buffer(scp, ILLEGAL_REQUEST,
 					LBA_OUT_OF_RANGE,
 					READ_INVDATA_ASCQ);
 			return check_condition_result;
 		}
 		return 0;
-	}
-
-	/* Writing into a gap zone is not allowed */
-	if (zbc_zone_is_gap(zsp)) {
-		mk_sense_buffer(scp, ILLEGAL_REQUEST, LBA_OUT_OF_RANGE,
-				ATTEMPT_ACCESS_GAP);
-		return check_condition_result;
 	}
 
 	/* No restrictions for writes within conventional zones */
@@ -2930,7 +2823,7 @@ static int check_zbc_access_params(struct scsi_cmnd *scp,
 		return 0;
 	}
 
-	if (zsp->z_type == ZBC_ZTYPE_SWR) {
+	if (zsp->z_type == ZBC_ZONE_TYPE_SWR) {
 		/* Writes cannot cross sequential zone boundaries */
 		if (zsp_end != zsp) {
 			mk_sense_buffer(scp, ILLEGAL_REQUEST,
@@ -3225,70 +3118,6 @@ static int prot_verify_read(struct scsi_cmnd *scp, sector_t start_sec,
 	return ret;
 }
 
-static inline void
-sdeb_read_lock(struct sdeb_store_info *sip)
-{
-	if (sdebug_no_rwlock) {
-		if (sip)
-			__acquire(&sip->macc_lck);
-		else
-			__acquire(&sdeb_fake_rw_lck);
-	} else {
-		if (sip)
-			read_lock(&sip->macc_lck);
-		else
-			read_lock(&sdeb_fake_rw_lck);
-	}
-}
-
-static inline void
-sdeb_read_unlock(struct sdeb_store_info *sip)
-{
-	if (sdebug_no_rwlock) {
-		if (sip)
-			__release(&sip->macc_lck);
-		else
-			__release(&sdeb_fake_rw_lck);
-	} else {
-		if (sip)
-			read_unlock(&sip->macc_lck);
-		else
-			read_unlock(&sdeb_fake_rw_lck);
-	}
-}
-
-static inline void
-sdeb_write_lock(struct sdeb_store_info *sip)
-{
-	if (sdebug_no_rwlock) {
-		if (sip)
-			__acquire(&sip->macc_lck);
-		else
-			__acquire(&sdeb_fake_rw_lck);
-	} else {
-		if (sip)
-			write_lock(&sip->macc_lck);
-		else
-			write_lock(&sdeb_fake_rw_lck);
-	}
-}
-
-static inline void
-sdeb_write_unlock(struct sdeb_store_info *sip)
-{
-	if (sdebug_no_rwlock) {
-		if (sip)
-			__release(&sip->macc_lck);
-		else
-			__release(&sdeb_fake_rw_lck);
-	} else {
-		if (sip)
-			write_unlock(&sip->macc_lck);
-		else
-			write_unlock(&sdeb_fake_rw_lck);
-	}
-}
-
 static int resp_read_dt0(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 {
 	bool check_prot;
@@ -3297,6 +3126,7 @@ static int resp_read_dt0(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 	int ret;
 	u64 lba;
 	struct sdeb_store_info *sip = devip2sip(devip, true);
+	rwlock_t *macc_lckp = sip ? &sip->macc_lck : &sdeb_fake_rw_lck;
 	u8 *cmd = scp->cmnd;
 
 	switch (cmd[0]) {
@@ -3375,29 +3205,29 @@ static int resp_read_dt0(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 		return check_condition_result;
 	}
 
-	sdeb_read_lock(sip);
+	read_lock(macc_lckp);
 
 	/* DIX + T10 DIF */
 	if (unlikely(sdebug_dix && scsi_prot_sg_count(scp))) {
 		switch (prot_verify_read(scp, lba, num, ei_lba)) {
 		case 1: /* Guard tag error */
 			if (cmd[1] >> 5 != 3) { /* RDPROTECT != 3 */
-				sdeb_read_unlock(sip);
+				read_unlock(macc_lckp);
 				mk_sense_buffer(scp, ABORTED_COMMAND, 0x10, 1);
 				return check_condition_result;
 			} else if (scp->prot_flags & SCSI_PROT_GUARD_CHECK) {
-				sdeb_read_unlock(sip);
+				read_unlock(macc_lckp);
 				mk_sense_buffer(scp, ILLEGAL_REQUEST, 0x10, 1);
 				return illegal_condition_result;
 			}
 			break;
 		case 3: /* Reference tag error */
 			if (cmd[1] >> 5 != 3) { /* RDPROTECT != 3 */
-				sdeb_read_unlock(sip);
+				read_unlock(macc_lckp);
 				mk_sense_buffer(scp, ABORTED_COMMAND, 0x10, 3);
 				return check_condition_result;
 			} else if (scp->prot_flags & SCSI_PROT_REF_CHECK) {
-				sdeb_read_unlock(sip);
+				read_unlock(macc_lckp);
 				mk_sense_buffer(scp, ILLEGAL_REQUEST, 0x10, 3);
 				return illegal_condition_result;
 			}
@@ -3406,7 +3236,7 @@ static int resp_read_dt0(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 	}
 
 	ret = do_device_access(sip, scp, 0, lba, num, false);
-	sdeb_read_unlock(sip);
+	read_unlock(macc_lckp);
 	if (unlikely(ret == -1))
 		return DID_ERROR << 16;
 
@@ -3594,6 +3424,7 @@ static int resp_write_dt0(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 	int ret;
 	u64 lba;
 	struct sdeb_store_info *sip = devip2sip(devip, true);
+	rwlock_t *macc_lckp = &sip->macc_lck;
 	u8 *cmd = scp->cmnd;
 
 	switch (cmd[0]) {
@@ -3648,10 +3479,10 @@ static int resp_write_dt0(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 				    "to DIF device\n");
 	}
 
-	sdeb_write_lock(sip);
+	write_lock(macc_lckp);
 	ret = check_device_access_params(scp, lba, num, true);
 	if (ret) {
-		sdeb_write_unlock(sip);
+		write_unlock(macc_lckp);
 		return ret;
 	}
 
@@ -3660,22 +3491,22 @@ static int resp_write_dt0(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 		switch (prot_verify_write(scp, lba, num, ei_lba)) {
 		case 1: /* Guard tag error */
 			if (scp->prot_flags & SCSI_PROT_GUARD_CHECK) {
-				sdeb_write_unlock(sip);
+				write_unlock(macc_lckp);
 				mk_sense_buffer(scp, ILLEGAL_REQUEST, 0x10, 1);
 				return illegal_condition_result;
 			} else if (scp->cmnd[1] >> 5 != 3) { /* WRPROTECT != 3 */
-				sdeb_write_unlock(sip);
+				write_unlock(macc_lckp);
 				mk_sense_buffer(scp, ABORTED_COMMAND, 0x10, 1);
 				return check_condition_result;
 			}
 			break;
 		case 3: /* Reference tag error */
 			if (scp->prot_flags & SCSI_PROT_REF_CHECK) {
-				sdeb_write_unlock(sip);
+				write_unlock(macc_lckp);
 				mk_sense_buffer(scp, ILLEGAL_REQUEST, 0x10, 3);
 				return illegal_condition_result;
 			} else if (scp->cmnd[1] >> 5 != 3) { /* WRPROTECT != 3 */
-				sdeb_write_unlock(sip);
+				write_unlock(macc_lckp);
 				mk_sense_buffer(scp, ABORTED_COMMAND, 0x10, 3);
 				return check_condition_result;
 			}
@@ -3689,7 +3520,7 @@ static int resp_write_dt0(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 	/* If ZBC zone then bump its write pointer */
 	if (sdebug_dev_is_zoned(devip))
 		zbc_inc_wp(devip, lba, num);
-	sdeb_write_unlock(sip);
+	write_unlock(macc_lckp);
 	if (unlikely(-1 == ret))
 		return DID_ERROR << 16;
 	else if (unlikely(sdebug_verbose &&
@@ -3729,6 +3560,7 @@ static int resp_write_scat(struct scsi_cmnd *scp,
 	u8 *lrdp = NULL;
 	u8 *up;
 	struct sdeb_store_info *sip = devip2sip(devip, true);
+	rwlock_t *macc_lckp = &sip->macc_lck;
 	u8 wrprotect;
 	u16 lbdof, num_lrd, k;
 	u32 num, num_by, bt_len, lbdof_blen, sg_off, cum_lb;
@@ -3783,7 +3615,7 @@ static int resp_write_scat(struct scsi_cmnd *scp,
 		mk_sense_buffer(scp, ILLEGAL_REQUEST, INVALID_FIELD_IN_CDB, 0);
 		return illegal_condition_result;
 	}
-	lrdp = kzalloc(lbdof_blen, GFP_ATOMIC | __GFP_NOWARN);
+	lrdp = kzalloc(lbdof_blen, GFP_ATOMIC);
 	if (lrdp == NULL)
 		return SCSI_MLQUEUE_HOST_BUSY;
 	if (sdebug_verbose)
@@ -3796,7 +3628,7 @@ static int resp_write_scat(struct scsi_cmnd *scp,
 		goto err_out;
 	}
 
-	sdeb_write_lock(sip);
+	write_lock(macc_lckp);
 	sg_off = lbdof_blen;
 	/* Spec says Buffer xfer Length field in number of LBs in dout */
 	cum_lb = 0;
@@ -3878,7 +3710,7 @@ static int resp_write_scat(struct scsi_cmnd *scp,
 	}
 	ret = 0;
 err_out_unlock:
-	sdeb_write_unlock(sip);
+	write_unlock(macc_lckp);
 err_out:
 	kfree(lrdp);
 	return ret;
@@ -3895,14 +3727,15 @@ static int resp_write_same(struct scsi_cmnd *scp, u64 lba, u32 num,
 	int ret;
 	struct sdeb_store_info *sip = devip2sip((struct sdebug_dev_info *)
 						scp->device->hostdata, true);
+	rwlock_t *macc_lckp = &sip->macc_lck;
 	u8 *fs1p;
 	u8 *fsp;
 
-	sdeb_write_lock(sip);
+	write_lock(macc_lckp);
 
 	ret = check_device_access_params(scp, lba, num, true);
 	if (ret) {
-		sdeb_write_unlock(sip);
+		write_unlock(macc_lckp);
 		return ret;
 	}
 
@@ -3922,7 +3755,7 @@ static int resp_write_same(struct scsi_cmnd *scp, u64 lba, u32 num,
 		ret = fetch_to_dev_buffer(scp, fs1p, lb_size);
 
 	if (-1 == ret) {
-		sdeb_write_unlock(sip);
+		write_unlock(&sip->macc_lck);
 		return DID_ERROR << 16;
 	} else if (sdebug_verbose && !ndob && (ret < lb_size))
 		sdev_printk(KERN_INFO, scp->device,
@@ -3941,7 +3774,7 @@ static int resp_write_same(struct scsi_cmnd *scp, u64 lba, u32 num,
 	if (sdebug_dev_is_zoned(devip))
 		zbc_inc_wp(devip, lba, num);
 out:
-	sdeb_write_unlock(sip);
+	write_unlock(macc_lckp);
 
 	return 0;
 }
@@ -4054,6 +3887,7 @@ static int resp_comp_write(struct scsi_cmnd *scp,
 	u8 *cmd = scp->cmnd;
 	u8 *arr;
 	struct sdeb_store_info *sip = devip2sip(devip, true);
+	rwlock_t *macc_lckp = &sip->macc_lck;
 	u64 lba;
 	u32 dnum;
 	u32 lb_size = sdebug_sector_size;
@@ -4086,7 +3920,7 @@ static int resp_comp_write(struct scsi_cmnd *scp,
 		return check_condition_result;
 	}
 
-	sdeb_write_lock(sip);
+	write_lock(macc_lckp);
 
 	ret = do_dout_fetch(scp, dnum, arr);
 	if (ret == -1) {
@@ -4104,7 +3938,7 @@ static int resp_comp_write(struct scsi_cmnd *scp,
 	if (scsi_debug_lbp())
 		map_region(sip, lba, num);
 cleanup:
-	sdeb_write_unlock(sip);
+	write_unlock(macc_lckp);
 	kfree(arr);
 	return retval;
 }
@@ -4120,6 +3954,7 @@ static int resp_unmap(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 	unsigned char *buf;
 	struct unmap_block_desc *desc;
 	struct sdeb_store_info *sip = devip2sip(devip, true);
+	rwlock_t *macc_lckp = &sip->macc_lck;
 	unsigned int i, payload_len, descriptors;
 	int ret;
 
@@ -4148,7 +3983,7 @@ static int resp_unmap(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 
 	desc = (void *)&buf[8];
 
-	sdeb_write_lock(sip);
+	write_lock(macc_lckp);
 
 	for (i = 0 ; i < descriptors ; i++) {
 		unsigned long long lba = get_unaligned_be64(&desc[i].lba);
@@ -4164,7 +3999,7 @@ static int resp_unmap(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 	ret = 0;
 
 out:
-	sdeb_write_unlock(sip);
+	write_unlock(macc_lckp);
 	kfree(buf);
 
 	return ret;
@@ -4256,6 +4091,7 @@ static int resp_pre_fetch(struct scsi_cmnd *scp,
 	u32 nblks;
 	u8 *cmd = scp->cmnd;
 	struct sdeb_store_info *sip = devip2sip(devip, true);
+	rwlock_t *macc_lckp = &sip->macc_lck;
 	u8 *fsp = sip->storep;
 
 	if (cmd[0] == PRE_FETCH) {	/* 10 byte cdb */
@@ -4277,12 +4113,12 @@ static int resp_pre_fetch(struct scsi_cmnd *scp,
 		rest = block + nblks - sdebug_store_sectors;
 
 	/* Try to bring the PRE-FETCH range into CPU's cache */
-	sdeb_read_lock(sip);
+	read_lock(macc_lckp);
 	prefetch_range(fsp + (sdebug_sector_size * block),
 		       (nblks - rest) * sdebug_sector_size);
 	if (rest)
 		prefetch_range(fsp, rest * sdebug_sector_size);
-	sdeb_read_unlock(sip);
+	read_unlock(macc_lckp);
 fini:
 	if (cmd[1] & 0x2)
 		res = SDEG_RES_IMMED_MASK;
@@ -4403,6 +4239,7 @@ static int resp_verify(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 	u8 *arr;
 	u8 *cmd = scp->cmnd;
 	struct sdeb_store_info *sip = devip2sip(devip, true);
+	rwlock_t *macc_lckp = &sip->macc_lck;
 
 	bytchk = (cmd[1] >> 1) & 0x3;
 	if (bytchk == 0) {
@@ -4434,14 +4271,14 @@ static int resp_verify(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 	if (ret)
 		return ret;
 
-	arr = kcalloc(lb_size, vnum, GFP_ATOMIC | __GFP_NOWARN);
+	arr = kcalloc(lb_size, vnum, GFP_ATOMIC);
 	if (!arr) {
 		mk_sense_buffer(scp, ILLEGAL_REQUEST, INSUFF_RES_ASC,
 				INSUFF_RES_ASCQ);
 		return check_condition_result;
 	}
 	/* Not changing store, so only need read access */
-	sdeb_read_lock(sip);
+	read_lock(macc_lckp);
 
 	ret = do_dout_fetch(scp, a_num, arr);
 	if (ret == -1) {
@@ -4463,26 +4300,27 @@ static int resp_verify(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 		goto cleanup;
 	}
 cleanup:
-	sdeb_read_unlock(sip);
+	read_unlock(macc_lckp);
 	kfree(arr);
 	return ret;
 }
 
 #define RZONES_DESC_HD 64
 
-/* Report zones depending on start LBA and reporting options */
+/* Report zones depending on start LBA nad reporting options */
 static int resp_report_zones(struct scsi_cmnd *scp,
 			     struct sdebug_dev_info *devip)
 {
-	unsigned int rep_max_zones, nrz = 0;
+	unsigned int i, max_zones, rep_max_zones, nrz = 0;
 	int ret = 0;
 	u32 alloc_len, rep_opts, rep_len;
 	bool partial;
 	u64 lba, zs_lba;
 	u8 *arr = NULL, *desc;
 	u8 *cmd = scp->cmnd;
-	struct sdeb_zone_state *zsp = NULL;
+	struct sdeb_zone_state *zsp;
 	struct sdeb_store_info *sip = devip2sip(devip, false);
+	rwlock_t *macc_lckp = sip ? &sip->macc_lck : &sdeb_fake_rw_lck;
 
 	if (!sdebug_dev_is_zoned(devip)) {
 		mk_sense_invalid_opcode(scp);
@@ -4500,21 +4338,23 @@ static int resp_report_zones(struct scsi_cmnd *scp,
 		return check_condition_result;
 	}
 
-	rep_max_zones = (alloc_len - 64) >> ilog2(RZONES_DESC_HD);
+	max_zones = devip->nr_zones - (zs_lba >> devip->zsize_shift);
+	rep_max_zones = min((alloc_len - 64) >> ilog2(RZONES_DESC_HD),
+			    max_zones);
 
-	arr = kzalloc(alloc_len, GFP_ATOMIC | __GFP_NOWARN);
+	arr = kzalloc(alloc_len, GFP_ATOMIC);
 	if (!arr) {
 		mk_sense_buffer(scp, ILLEGAL_REQUEST, INSUFF_RES_ASC,
 				INSUFF_RES_ASCQ);
 		return check_condition_result;
 	}
 
-	sdeb_read_lock(sip);
+	read_lock(macc_lckp);
 
 	desc = arr + 64;
-	for (lba = zs_lba; lba < sdebug_capacity;
-	     lba = zsp->z_start + zsp->z_size) {
-		if (WARN_ONCE(zbc_zone(devip, lba) == zsp, "lba = %llu\n", lba))
+	for (i = 0; i < max_zones; i++) {
+		lba = zs_lba + devip->zsize * i;
+		if (lba > sdebug_capacity)
 			break;
 		zsp = zbc_zone(devip, lba);
 		switch (rep_opts) {
@@ -4559,14 +4399,9 @@ static int resp_report_zones(struct scsi_cmnd *scp,
 			if (!zsp->z_non_seq_resource)
 				continue;
 			break;
-		case 0x3e:
-			/* All zones except gap zones. */
-			if (zbc_zone_is_gap(zsp))
-				continue;
-			break;
 		case 0x3f:
 			/* Not write pointer (conventional) zones */
-			if (zbc_zone_is_seq(zsp))
+			if (!zbc_zone_is_conv(zsp))
 				continue;
 			break;
 		default:
@@ -4595,19 +4430,14 @@ static int resp_report_zones(struct scsi_cmnd *scp,
 	}
 
 	/* Report header */
-	/* Zone list length. */
 	put_unaligned_be32(nrz * RZONES_DESC_HD, arr + 0);
-	/* Maximum LBA */
 	put_unaligned_be64(sdebug_capacity - 1, arr + 8);
-	/* Zone starting LBA granularity. */
-	if (devip->zcap < devip->zsize)
-		put_unaligned_be64(devip->zsize, arr + 16);
 
 	rep_len = (unsigned long)desc - (unsigned long)arr;
 	ret = fill_from_dev_buffer(scp, arr, min_t(u32, alloc_len, rep_len));
 
 fini:
-	sdeb_read_unlock(sip);
+	read_unlock(macc_lckp);
 	kfree(arr);
 	return ret;
 }
@@ -4633,13 +4463,14 @@ static int resp_open_zone(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 	struct sdeb_zone_state *zsp;
 	bool all = cmd[14] & 0x01;
 	struct sdeb_store_info *sip = devip2sip(devip, false);
+	rwlock_t *macc_lckp = sip ? &sip->macc_lck : &sdeb_fake_rw_lck;
 
 	if (!sdebug_dev_is_zoned(devip)) {
 		mk_sense_invalid_opcode(scp);
 		return check_condition_result;
 	}
 
-	sdeb_write_lock(sip);
+	write_lock(macc_lckp);
 
 	if (all) {
 		/* Check if all closed zones can be open */
@@ -4688,7 +4519,7 @@ static int resp_open_zone(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 
 	zbc_open_zone(devip, zsp, true);
 fini:
-	sdeb_write_unlock(sip);
+	write_unlock(macc_lckp);
 	return res;
 }
 
@@ -4709,13 +4540,14 @@ static int resp_close_zone(struct scsi_cmnd *scp,
 	struct sdeb_zone_state *zsp;
 	bool all = cmd[14] & 0x01;
 	struct sdeb_store_info *sip = devip2sip(devip, false);
+	rwlock_t *macc_lckp = sip ? &sip->macc_lck : &sdeb_fake_rw_lck;
 
 	if (!sdebug_dev_is_zoned(devip)) {
 		mk_sense_invalid_opcode(scp);
 		return check_condition_result;
 	}
 
-	sdeb_write_lock(sip);
+	write_lock(macc_lckp);
 
 	if (all) {
 		zbc_close_all(devip);
@@ -4744,7 +4576,7 @@ static int resp_close_zone(struct scsi_cmnd *scp,
 
 	zbc_close_zone(devip, zsp);
 fini:
-	sdeb_write_unlock(sip);
+	write_unlock(macc_lckp);
 	return res;
 }
 
@@ -4781,13 +4613,14 @@ static int resp_finish_zone(struct scsi_cmnd *scp,
 	u8 *cmd = scp->cmnd;
 	bool all = cmd[14] & 0x01;
 	struct sdeb_store_info *sip = devip2sip(devip, false);
+	rwlock_t *macc_lckp = sip ? &sip->macc_lck : &sdeb_fake_rw_lck;
 
 	if (!sdebug_dev_is_zoned(devip)) {
 		mk_sense_invalid_opcode(scp);
 		return check_condition_result;
 	}
 
-	sdeb_write_lock(sip);
+	write_lock(macc_lckp);
 
 	if (all) {
 		zbc_finish_all(devip);
@@ -4816,7 +4649,7 @@ static int resp_finish_zone(struct scsi_cmnd *scp,
 
 	zbc_finish_zone(devip, zsp, true);
 fini:
-	sdeb_write_unlock(sip);
+	write_unlock(macc_lckp);
 	return res;
 }
 
@@ -4826,7 +4659,7 @@ static void zbc_rwp_zone(struct sdebug_dev_info *devip,
 	enum sdebug_z_cond zc;
 	struct sdeb_store_info *sip = devip2sip(devip, false);
 
-	if (!zbc_zone_is_seq(zsp))
+	if (zbc_zone_is_conv(zsp))
 		return;
 
 	zc = zsp->z_cond;
@@ -4861,13 +4694,14 @@ static int resp_rwp_zone(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 	u8 *cmd = scp->cmnd;
 	bool all = cmd[14] & 0x01;
 	struct sdeb_store_info *sip = devip2sip(devip, false);
+	rwlock_t *macc_lckp = sip ? &sip->macc_lck : &sdeb_fake_rw_lck;
 
 	if (!sdebug_dev_is_zoned(devip)) {
 		mk_sense_invalid_opcode(scp);
 		return check_condition_result;
 	}
 
-	sdeb_write_lock(sip);
+	write_lock(macc_lckp);
 
 	if (all) {
 		zbc_rwp_all(devip);
@@ -4895,7 +4729,7 @@ static int resp_rwp_zone(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 
 	zbc_rwp_zone(devip, zsp);
 fini:
-	sdeb_write_unlock(sip);
+	write_unlock(macc_lckp);
 	return res;
 }
 
@@ -4944,7 +4778,7 @@ static void sdebug_q_cmd_complete(struct sdebug_defer *sd_dp)
 		return;
 	}
 	spin_lock_irqsave(&sqp->qc_lock, iflags);
-	WRITE_ONCE(sd_dp->defer_t, SDEB_DEFER_NONE);
+	sd_dp->defer_t = SDEB_DEFER_NONE;
 	sqcp = &sqp->qc_arr[qc_idx];
 	scp = sqcp->a_cmnd;
 	if (unlikely(scp == NULL)) {
@@ -4989,7 +4823,7 @@ static void sdebug_q_cmd_complete(struct sdebug_defer *sd_dp)
 			pr_info("bypassing scsi_done() due to aborted cmd\n");
 		return;
 	}
-	scsi_done(scp); /* callback to mid level */
+	scp->scsi_done(scp); /* callback to mid level */
 }
 
 /* When high resolution timer goes off this function is called. */
@@ -5016,7 +4850,6 @@ static int sdebug_device_create_zones(struct sdebug_dev_info *devip)
 {
 	struct sdeb_zone_state *zsp;
 	sector_t capacity = get_sdebug_capacity();
-	sector_t conv_capacity;
 	sector_t zstart = 0;
 	unsigned int i;
 
@@ -5051,30 +4884,11 @@ static int sdebug_device_create_zones(struct sdebug_dev_info *devip)
 	devip->zsize_shift = ilog2(devip->zsize);
 	devip->nr_zones = (capacity + devip->zsize - 1) >> devip->zsize_shift;
 
-	if (sdeb_zbc_zone_cap_mb == 0) {
-		devip->zcap = devip->zsize;
-	} else {
-		devip->zcap = (sdeb_zbc_zone_cap_mb * SZ_1M) >>
-			      ilog2(sdebug_sector_size);
-		if (devip->zcap > devip->zsize) {
-			pr_err("Zone capacity too large\n");
-			return -EINVAL;
-		}
-	}
-
-	conv_capacity = (sector_t)sdeb_zbc_nr_conv << devip->zsize_shift;
-	if (conv_capacity >= capacity) {
+	if (sdeb_zbc_nr_conv >= devip->nr_zones) {
 		pr_err("Number of conventional zones too large\n");
 		return -EINVAL;
 	}
 	devip->nr_conv_zones = sdeb_zbc_nr_conv;
-	devip->nr_seq_zones = ALIGN(capacity - conv_capacity, devip->zsize) >>
-			      devip->zsize_shift;
-	devip->nr_zones = devip->nr_conv_zones + devip->nr_seq_zones;
-
-	/* Add gap zones if zone capacity is smaller than the zone size */
-	if (devip->zcap < devip->zsize)
-		devip->nr_zones += devip->nr_seq_zones;
 
 	if (devip->zmodel == BLK_ZONED_HM) {
 		/* zbc_max_open_zones can be 0, meaning "not reported" */
@@ -5095,29 +4909,23 @@ static int sdebug_device_create_zones(struct sdebug_dev_info *devip)
 		zsp->z_start = zstart;
 
 		if (i < devip->nr_conv_zones) {
-			zsp->z_type = ZBC_ZTYPE_CNV;
+			zsp->z_type = ZBC_ZONE_TYPE_CNV;
 			zsp->z_cond = ZBC_NOT_WRITE_POINTER;
 			zsp->z_wp = (sector_t)-1;
-			zsp->z_size =
-				min_t(u64, devip->zsize, capacity - zstart);
-		} else if ((zstart & (devip->zsize - 1)) == 0) {
+		} else {
 			if (devip->zmodel == BLK_ZONED_HM)
-				zsp->z_type = ZBC_ZTYPE_SWR;
+				zsp->z_type = ZBC_ZONE_TYPE_SWR;
 			else
-				zsp->z_type = ZBC_ZTYPE_SWP;
+				zsp->z_type = ZBC_ZONE_TYPE_SWP;
 			zsp->z_cond = ZC1_EMPTY;
 			zsp->z_wp = zsp->z_start;
-			zsp->z_size =
-				min_t(u64, devip->zcap, capacity - zstart);
-		} else {
-			zsp->z_type = ZBC_ZTYPE_GAP;
-			zsp->z_cond = ZBC_NOT_WRITE_POINTER;
-			zsp->z_wp = (sector_t)-1;
-			zsp->z_size = min_t(u64, devip->zsize - devip->zcap,
-					    capacity - zstart);
 		}
 
-		WARN_ON_ONCE((int)zsp->z_size <= 0);
+		if (zsp->z_start + devip->zsize < capacity)
+			zsp->z_size = devip->zsize;
+		else
+			zsp->z_size = capacity - zsp->z_start;
+
 		zstart += zsp->z_size;
 	}
 
@@ -5195,7 +5003,7 @@ static struct sdebug_dev_info *find_build_dev_info(struct scsi_device *sdev)
 	open_devip->lun = sdev->lun;
 	open_devip->sdbg_host = sdbg_host;
 	atomic_set(&open_devip->num_in_q, 0);
-	set_bit(SDEBUG_UA_POOCCUR, open_devip->uas_bm);
+	set_bit(SDEBUG_UA_POR, open_devip->uas_bm);
 	open_devip->used = true;
 	return open_devip;
 }
@@ -5287,8 +5095,8 @@ static bool stop_queued_cmnd(struct scsi_cmnd *cmnd)
 				sqcp->a_cmnd = NULL;
 				sd_dp = sqcp->sd_dp;
 				if (sd_dp) {
-					l_defer_t = READ_ONCE(sd_dp->defer_t);
-					WRITE_ONCE(sd_dp->defer_t, SDEB_DEFER_NONE);
+					l_defer_t = sd_dp->defer_t;
+					sd_dp->defer_t = SDEB_DEFER_NONE;
 				} else
 					l_defer_t = SDEB_DEFER_NONE;
 				spin_unlock_irqrestore(&sqp->qc_lock, iflags);
@@ -5327,8 +5135,8 @@ static void stop_all_queued(void)
 				sqcp->a_cmnd = NULL;
 				sd_dp = sqcp->sd_dp;
 				if (sd_dp) {
-					l_defer_t = READ_ONCE(sd_dp->defer_t);
-					WRITE_ONCE(sd_dp->defer_t, SDEB_DEFER_NONE);
+					l_defer_t = sd_dp->defer_t;
+					sd_dp->defer_t = SDEB_DEFER_NONE;
 				} else
 					l_defer_t = SDEB_DEFER_NONE;
 				spin_unlock_irqrestore(&sqp->qc_lock, iflags);
@@ -5590,7 +5398,7 @@ static int schedule_resp(struct scsi_cmnd *cmnd, struct sdebug_dev_info *devip,
 {
 	bool new_sd_dp;
 	bool inject = false;
-	bool polled = scsi_cmd_to_rq(cmnd)->cmd_flags & REQ_POLLED;
+	bool hipri = scsi_cmd_to_rq(cmnd)->cmd_flags & REQ_HIPRI;
 	int k, num_in_q, qdepth;
 	unsigned long iflags;
 	u64 ns_from_boot = 0;
@@ -5640,11 +5448,18 @@ static int schedule_resp(struct scsi_cmnd *cmnd, struct sdebug_dev_info *devip,
 		spin_unlock_irqrestore(&sqp->qc_lock, iflags);
 		if (scsi_result)
 			goto respond_in_thread;
-		scsi_result = device_qfull_result;
+		else if (SDEBUG_OPT_ALL_TSF & sdebug_opts)
+			scsi_result = device_qfull_result;
 		if (SDEBUG_OPT_Q_NOISE & sdebug_opts)
-			sdev_printk(KERN_INFO, sdp, "%s: max_queue=%d exceeded: TASK SET FULL\n",
-				    __func__, sdebug_max_queue);
-		goto respond_in_thread;
+			sdev_printk(KERN_INFO, sdp,
+				    "%s: max_queue=%d exceeded, %s\n",
+				    __func__, sdebug_max_queue,
+				    (scsi_result ?  "status: TASK SET FULL" :
+						    "report: host busy"));
+		if (scsi_result)
+			goto respond_in_thread;
+		else
+			return SCSI_MLQUEUE_HOST_BUSY;
 	}
 	set_bit(k, sqp->in_use_bm);
 	atomic_inc(&devip->num_in_q);
@@ -5670,7 +5485,7 @@ static int schedule_resp(struct scsi_cmnd *cmnd, struct sdebug_dev_info *devip,
 	if (sdebug_host_max_queue)
 		sd_dp->hc_idx = get_tag(cmnd);
 
-	if (polled)
+	if (hipri)
 		ns_from_boot = ktime_get_boottime_ns();
 
 	/* one of the resp_*() response functions is called here */
@@ -5700,16 +5515,16 @@ static int schedule_resp(struct scsi_cmnd *cmnd, struct sdebug_dev_info *devip,
 			u64 ns = jiffies_to_nsecs(delta_jiff);
 
 			if (sdebug_random && ns < U32_MAX) {
-				ns = get_random_u32_below((u32)ns);
+				ns = prandom_u32_max((u32)ns);
 			} else if (sdebug_random) {
 				ns >>= 12;	/* scale to 4 usec precision */
 				if (ns < U32_MAX)	/* over 4 hours max */
-					ns = get_random_u32_below((u32)ns);
+					ns = prandom_u32_max((u32)ns);
 				ns <<= 12;
 			}
 			kt = ns_to_ktime(ns);
 		} else {	/* ndelay has a 4.2 second max */
-			kt = sdebug_random ? get_random_u32_below((u32)ndelay) :
+			kt = sdebug_random ? prandom_u32_max((u32)ndelay) :
 					     (u32)ndelay;
 			if (ndelay < INCLUSIVE_TIMING_MAX_NS) {
 				u64 d = ktime_get_boottime_ns() - ns_from_boot;
@@ -5723,14 +5538,14 @@ static int schedule_resp(struct scsi_cmnd *cmnd, struct sdebug_dev_info *devip,
 					if (new_sd_dp)
 						kfree(sd_dp);
 					/* call scsi_done() from this thread */
-					scsi_done(cmnd);
+					cmnd->scsi_done(cmnd);
 					return 0;
 				}
 				/* otherwise reduce kt by elapsed time */
 				kt -= d;
 			}
 		}
-		if (polled) {
+		if (hipri) {
 			sd_dp->cmpl_ts = ktime_add(ns_to_ktime(ns_from_boot), kt);
 			spin_lock_irqsave(&sqp->qc_lock, iflags);
 			if (!sd_dp->init_poll) {
@@ -5739,7 +5554,7 @@ static int schedule_resp(struct scsi_cmnd *cmnd, struct sdebug_dev_info *devip,
 				sd_dp->sqa_idx = sqp - sdebug_q_arr;
 				sd_dp->qc_idx = k;
 			}
-			WRITE_ONCE(sd_dp->defer_t, SDEB_DEFER_POLL);
+			sd_dp->defer_t = SDEB_DEFER_POLL;
 			spin_unlock_irqrestore(&sqp->qc_lock, iflags);
 		} else {
 			if (!sd_dp->init_hrt) {
@@ -5751,7 +5566,7 @@ static int schedule_resp(struct scsi_cmnd *cmnd, struct sdebug_dev_info *devip,
 				sd_dp->sqa_idx = sqp - sdebug_q_arr;
 				sd_dp->qc_idx = k;
 			}
-			WRITE_ONCE(sd_dp->defer_t, SDEB_DEFER_HRT);
+			sd_dp->defer_t = SDEB_DEFER_HRT;
 			/* schedule the invocation of scsi_done() for a later time */
 			hrtimer_start(&sd_dp->hrt, kt, HRTIMER_MODE_REL_PINNED);
 		}
@@ -5761,7 +5576,7 @@ static int schedule_resp(struct scsi_cmnd *cmnd, struct sdebug_dev_info *devip,
 		if (unlikely((sdebug_opts & SDEBUG_OPT_CMD_ABORT) &&
 			     atomic_read(&sdeb_inject_pending)))
 			sd_dp->aborted = true;
-		if (polled) {
+		if (hipri) {
 			sd_dp->cmpl_ts = ns_to_ktime(ns_from_boot);
 			spin_lock_irqsave(&sqp->qc_lock, iflags);
 			if (!sd_dp->init_poll) {
@@ -5770,7 +5585,7 @@ static int schedule_resp(struct scsi_cmnd *cmnd, struct sdebug_dev_info *devip,
 				sd_dp->sqa_idx = sqp - sdebug_q_arr;
 				sd_dp->qc_idx = k;
 			}
-			WRITE_ONCE(sd_dp->defer_t, SDEB_DEFER_POLL);
+			sd_dp->defer_t = SDEB_DEFER_POLL;
 			spin_unlock_irqrestore(&sqp->qc_lock, iflags);
 		} else {
 			if (!sd_dp->init_wq) {
@@ -5780,7 +5595,7 @@ static int schedule_resp(struct scsi_cmnd *cmnd, struct sdebug_dev_info *devip,
 				sd_dp->qc_idx = k;
 				INIT_WORK(&sd_dp->ew.work, sdebug_q_cmd_wq_complete);
 			}
-			WRITE_ONCE(sd_dp->defer_t, SDEB_DEFER_WQ);
+			sd_dp->defer_t = SDEB_DEFER_WQ;
 			schedule_work(&sd_dp->ew.work);
 		}
 		if (sdebug_statistics)
@@ -5803,7 +5618,7 @@ respond_in_thread:	/* call back to mid-layer using invocation thread */
 	cmnd->result &= ~SDEG_RES_IMMED_MASK;
 	if (cmnd->result == 0 && scsi_result != 0)
 		cmnd->result = scsi_result;
-	scsi_done(cmnd);
+	cmnd->scsi_done(cmnd);
 	return 0;
 }
 
@@ -5847,7 +5662,6 @@ module_param_named(medium_error_start, sdebug_medium_error_start, int,
 		   S_IRUGO | S_IWUSR);
 module_param_named(ndelay, sdebug_ndelay, int, S_IRUGO | S_IWUSR);
 module_param_named(no_lun_0, sdebug_no_lun_0, int, S_IRUGO | S_IWUSR);
-module_param_named(no_rwlock, sdebug_no_rwlock, bool, S_IRUGO | S_IWUSR);
 module_param_named(no_uld, sdebug_no_uld, int, S_IRUGO);
 module_param_named(num_parts, sdebug_num_parts, int, S_IRUGO);
 module_param_named(num_tgts, sdebug_num_tgts, int, S_IRUGO | S_IWUSR);
@@ -5879,7 +5693,6 @@ module_param_named(wp, sdebug_wp, bool, S_IRUGO | S_IWUSR);
 module_param_named(write_same_length, sdebug_write_same_length, int,
 		   S_IRUGO | S_IWUSR);
 module_param_named(zbc, sdeb_zbc_model_s, charp, S_IRUGO);
-module_param_named(zone_cap_mb, sdeb_zbc_zone_cap_mb, int, S_IRUGO);
 module_param_named(zone_max_open, sdeb_zbc_max_open, int, S_IRUGO);
 module_param_named(zone_nr_conv, sdeb_zbc_nr_conv, int, S_IRUGO);
 module_param_named(zone_size_mb, sdeb_zbc_zone_size_mb, int, S_IRUGO);
@@ -5921,7 +5734,6 @@ MODULE_PARM_DESC(medium_error_count, "count of sectors to return follow on MEDIU
 MODULE_PARM_DESC(medium_error_start, "starting sector number to return MEDIUM error");
 MODULE_PARM_DESC(ndelay, "response delay in nanoseconds (def=0 -> ignore)");
 MODULE_PARM_DESC(no_lun_0, "no LU number 0 (def=0 -> have lun 0)");
-MODULE_PARM_DESC(no_rwlock, "don't protect user data reads+writes (def=0)");
 MODULE_PARM_DESC(no_uld, "stop ULD (e.g. sd driver) attaching (def=0))");
 MODULE_PARM_DESC(num_parts, "number of partitions(def=0)");
 MODULE_PARM_DESC(num_tgts, "number of targets per host to simulate(def=1)");
@@ -5951,7 +5763,6 @@ MODULE_PARM_DESC(vpd_use_hostno, "0 -> dev ids ignore hostno (def=1 -> unique de
 MODULE_PARM_DESC(wp, "Write Protect (def=0)");
 MODULE_PARM_DESC(write_same_length, "Maximum blocks per WRITE SAME cmd (def=0xffff)");
 MODULE_PARM_DESC(zbc, "'none' [0]; 'aware' [1]; 'managed' [2] (def=0). Can have 'host-' prefix");
-MODULE_PARM_DESC(zone_cap_mb, "Zone capacity in MiB (def=zone size)");
 MODULE_PARM_DESC(zone_max_open, "Maximum number of open zones; [0] for no limit (def=auto)");
 MODULE_PARM_DESC(zone_nr_conv, "Number of conventional zones (def=1)");
 MODULE_PARM_DESC(zone_size_mb, "Zone size in MiB (def=auto)");
@@ -6485,23 +6296,6 @@ static ssize_t host_max_queue_show(struct device_driver *ddp, char *buf)
 	return scnprintf(buf, PAGE_SIZE, "%d\n", sdebug_host_max_queue);
 }
 
-static ssize_t no_rwlock_show(struct device_driver *ddp, char *buf)
-{
-	return scnprintf(buf, PAGE_SIZE, "%d\n", sdebug_no_rwlock);
-}
-
-static ssize_t no_rwlock_store(struct device_driver *ddp, const char *buf, size_t count)
-{
-	bool v;
-
-	if (kstrtobool(buf, &v))
-		return -EINVAL;
-
-	sdebug_no_rwlock = v;
-	return count;
-}
-static DRIVER_ATTR_RW(no_rwlock);
-
 /*
  * Since this is used for .can_queue, and we get the hc_idx tag from the bitmap
  * in range [0, sdebug_host_max_queue), we can't change it.
@@ -6862,7 +6656,6 @@ static struct attribute *sdebug_drv_attrs[] = {
 	&driver_attr_lun_format.attr,
 	&driver_attr_max_luns.attr,
 	&driver_attr_max_queue.attr,
-	&driver_attr_no_rwlock.attr,
 	&driver_attr_no_uld.attr,
 	&driver_attr_scsi_level.attr,
 	&driver_attr_virtual_gb.attr,
@@ -7321,12 +7114,8 @@ static int sdebug_add_host_helper(int per_host_idx)
 	dev_set_name(&sdbg_host->dev, "adapter%d", sdebug_num_hosts);
 
 	error = device_register(&sdbg_host->dev);
-	if (error) {
-		spin_lock(&sdebug_host_list_lock);
-		list_del(&sdbg_host->host_list);
-		spin_unlock(&sdebug_host_list_lock);
+	if (error)
 		goto clean;
-	}
 
 	++sdebug_num_hosts;
 	return 0;
@@ -7338,10 +7127,7 @@ clean:
 		kfree(sdbg_devinfo->zstate);
 		kfree(sdbg_devinfo);
 	}
-	if (sdbg_host->dev.release)
-		put_device(&sdbg_host->dev);
-	else
-		kfree(sdbg_host);
+	kfree(sdbg_host);
 	pr_warn("%s: failed, errno=%d\n", __func__, -error);
 	return error;
 }
@@ -7486,12 +7272,12 @@ static int resp_not_ready(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 	return check_condition_result;
 }
 
-static void sdebug_map_queues(struct Scsi_Host *shost)
+static int sdebug_map_queues(struct Scsi_Host *shost)
 {
 	int i, qoff;
 
 	if (shost->nr_hw_queues == 1)
-		return;
+		return 0;
 
 	for (i = 0, qoff = 0; i < HCTX_MAX_TYPES; i++) {
 		struct blk_mq_queue_map *map = &shost->tag_set.map[i];
@@ -7513,6 +7299,9 @@ static void sdebug_map_queues(struct Scsi_Host *shost)
 
 		qoff += map->nr_queues;
 	}
+
+	return 0;
+
 }
 
 static int sdebug_blk_mq_poll(struct Scsi_Host *shost, unsigned int queue_num)
@@ -7530,22 +7319,16 @@ static int sdebug_blk_mq_poll(struct Scsi_Host *shost, unsigned int queue_num)
 	struct sdebug_defer *sd_dp;
 
 	sqp = sdebug_q_arr + queue_num;
-
 	spin_lock_irqsave(&sqp->qc_lock, iflags);
-
-	qc_idx = find_first_bit(sqp->in_use_bm, sdebug_max_queue);
-	if (qc_idx >= sdebug_max_queue)
-		goto unlock;
 
 	for (first = true; first || qc_idx + 1 < sdebug_max_queue; )   {
 		if (first) {
+			qc_idx = find_first_bit(sqp->in_use_bm, sdebug_max_queue);
 			first = false;
-			if (!test_bit(qc_idx, sqp->in_use_bm))
-				continue;
 		} else {
 			qc_idx = find_next_bit(sqp->in_use_bm, sdebug_max_queue, qc_idx + 1);
 		}
-		if (qc_idx >= sdebug_max_queue)
+		if (unlikely(qc_idx >= sdebug_max_queue))
 			break;
 
 		sqcp = &sqp->qc_arr[qc_idx];
@@ -7558,11 +7341,11 @@ static int sdebug_blk_mq_poll(struct Scsi_Host *shost, unsigned int queue_num)
 			       queue_num, qc_idx, __func__);
 			break;
 		}
-		if (READ_ONCE(sd_dp->defer_t) == SDEB_DEFER_POLL) {
+		if (sd_dp->defer_t == SDEB_DEFER_POLL) {
 			if (kt_from_boot < sd_dp->cmpl_ts)
 				continue;
 
-		} else		/* ignoring non REQ_POLLED requests */
+		} else		/* ignoring non REQ_HIPRI requests */
 			continue;
 		devip = (struct sdebug_dev_info *)scp->device->hostdata;
 		if (likely(devip))
@@ -7592,18 +7375,13 @@ static int sdebug_blk_mq_poll(struct Scsi_Host *shost, unsigned int queue_num)
 			else
 				atomic_set(&retired_max_queue, k + 1);
 		}
-		WRITE_ONCE(sd_dp->defer_t, SDEB_DEFER_NONE);
+		sd_dp->defer_t = SDEB_DEFER_NONE;
 		spin_unlock_irqrestore(&sqp->qc_lock, iflags);
-		scsi_done(scp); /* callback to mid level */
-		num_entries++;
+		scp->scsi_done(scp); /* callback to mid level */
 		spin_lock_irqsave(&sqp->qc_lock, iflags);
-		if (find_first_bit(sqp->in_use_bm, sdebug_max_queue) >= sdebug_max_queue)
-			break;
+		num_entries++;
 	}
-
-unlock:
 	spin_unlock_irqrestore(&sqp->qc_lock, iflags);
-
 	if (num_entries > 0)
 		atomic_add(num_entries, &sdeb_mq_poll_count);
 	return num_entries;

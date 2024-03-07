@@ -9,7 +9,6 @@
  *  Copyright (C) 2016  IBM Corporation
  */
 
-#include <linux/ima.h>
 #include <linux/kernel.h>
 #include <linux/kexec.h>
 #include <linux/memblock.h>
@@ -17,7 +16,6 @@
 #include <linux/of.h>
 #include <linux/of_fdt.h>
 #include <linux/random.h>
-#include <linux/slab.h>
 #include <linux/types.h>
 
 #define RNG_SEED_SIZE		128
@@ -116,7 +114,6 @@ static int do_get_kexec_buffer(const void *prop, int len, unsigned long *addr,
 	return 0;
 }
 
-#ifdef CONFIG_HAVE_IMA_KEXEC
 /**
  * ima_get_kexec_buffer - get IMA buffer from the previous kernel
  * @addr:	On successful return, set to point to the buffer contents.
@@ -124,13 +121,15 @@ static int do_get_kexec_buffer(const void *prop, int len, unsigned long *addr,
  *
  * Return: 0 on success, negative errno on error.
  */
-int __init ima_get_kexec_buffer(void **addr, size_t *size)
+int ima_get_kexec_buffer(void **addr, size_t *size)
 {
 	int ret, len;
 	unsigned long tmp_addr;
-	unsigned long start_pfn, end_pfn;
 	size_t tmp_size;
 	const void *prop;
+
+	if (!IS_ENABLED(CONFIG_HAVE_IMA_KEXEC))
+		return -ENOTSUPP;
 
 	prop = of_get_property(of_chosen, "linux,ima-kexec-buffer", &len);
 	if (!prop)
@@ -139,22 +138,6 @@ int __init ima_get_kexec_buffer(void **addr, size_t *size)
 	ret = do_get_kexec_buffer(prop, len, &tmp_addr, &tmp_size);
 	if (ret)
 		return ret;
-
-	/* Do some sanity on the returned size for the ima-kexec buffer */
-	if (!tmp_size)
-		return -ENOENT;
-
-	/*
-	 * Calculate the PFNs for the buffer and ensure
-	 * they are with in addressable memory.
-	 */
-	start_pfn = PHYS_PFN(tmp_addr);
-	end_pfn = PHYS_PFN(tmp_addr + tmp_size - 1);
-	if (!page_is_ram(start_pfn) || !page_is_ram(end_pfn)) {
-		pr_warn("IMA buffer at 0x%lx, size = 0x%zx beyond memory\n",
-			tmp_addr, tmp_size);
-		return -EINVAL;
-	}
 
 	*addr = __va(tmp_addr);
 	*size = tmp_size;
@@ -165,12 +148,15 @@ int __init ima_get_kexec_buffer(void **addr, size_t *size)
 /**
  * ima_free_kexec_buffer - free memory used by the IMA buffer
  */
-int __init ima_free_kexec_buffer(void)
+int ima_free_kexec_buffer(void)
 {
 	int ret;
 	unsigned long addr;
 	size_t size;
 	struct property *prop;
+
+	if (!IS_ENABLED(CONFIG_HAVE_IMA_KEXEC))
+		return -ENOTSUPP;
 
 	prop = of_find_property(of_chosen, "linux,ima-kexec-buffer", NULL);
 	if (!prop)
@@ -184,9 +170,9 @@ int __init ima_free_kexec_buffer(void)
 	if (ret)
 		return ret;
 
-	return memblock_phys_free(addr, size);
+	return memblock_free(addr, size);
+
 }
-#endif
 
 /**
  * remove_ima_buffer - remove the IMA buffer property and reservation from @fdt
@@ -281,7 +267,7 @@ void *of_kexec_alloc_and_setup_fdt(const struct kimage *image,
 				   const char *cmdline, size_t extra_fdt_size)
 {
 	void *fdt;
-	int ret, chosen_node, len;
+	int ret, chosen_node;
 	const void *prop;
 	size_t fdt_size;
 
@@ -324,19 +310,19 @@ void *of_kexec_alloc_and_setup_fdt(const struct kimage *image,
 		goto out;
 
 	/* Did we boot using an initrd? */
-	prop = fdt_getprop(fdt, chosen_node, "linux,initrd-start", &len);
+	prop = fdt_getprop(fdt, chosen_node, "linux,initrd-start", NULL);
 	if (prop) {
 		u64 tmp_start, tmp_end, tmp_size;
 
-		tmp_start = of_read_number(prop, len / 4);
+		tmp_start = fdt64_to_cpu(*((const fdt64_t *) prop));
 
-		prop = fdt_getprop(fdt, chosen_node, "linux,initrd-end", &len);
+		prop = fdt_getprop(fdt, chosen_node, "linux,initrd-end", NULL);
 		if (!prop) {
 			ret = -EINVAL;
 			goto out;
 		}
 
-		tmp_end = of_read_number(prop, len / 4);
+		tmp_end = fdt64_to_cpu(*((const fdt64_t *) prop));
 
 		/*
 		 * kexec reserves exact initrd size, while firmware may
@@ -400,15 +386,6 @@ void *of_kexec_alloc_and_setup_fdt(const struct kimage *image,
 				crashk_res.end - crashk_res.start + 1);
 		if (ret)
 			goto out;
-
-		if (crashk_low_res.end) {
-			ret = fdt_appendprop_addrrange(fdt, 0, chosen_node,
-					"linux,usable-memory-range",
-					crashk_low_res.start,
-					crashk_low_res.end - crashk_low_res.start + 1);
-			if (ret)
-				goto out;
-		}
 	}
 
 	/* add bootargs */

@@ -19,6 +19,7 @@
 #define pr_fmt(fmt) "ACPI: VIOT: " fmt
 
 #include <linux/acpi_viot.h>
+#include <linux/dma-iommu.h>
 #include <linux/fwnode.h>
 #include <linux/iommu.h>
 #include <linux/list.h>
@@ -87,7 +88,7 @@ static int __init viot_get_pci_iommu_fwnode(struct viot_iommu *viommu,
 		return -ENODEV;
 	}
 
-	fwnode = dev_fwnode(&pdev->dev);
+	fwnode = pdev->dev.fwnode;
 	if (!fwnode) {
 		/*
 		 * PCI devices aren't necessarily described by ACPI. Create a
@@ -100,7 +101,7 @@ static int __init viot_get_pci_iommu_fwnode(struct viot_iommu *viommu,
 		}
 		set_primary_fwnode(&pdev->dev, fwnode);
 	}
-	viommu->fwnode = dev_fwnode(&pdev->dev);
+	viommu->fwnode = pdev->dev.fwnode;
 	pci_dev_put(pdev);
 	return 0;
 }
@@ -248,26 +249,6 @@ err_free:
 }
 
 /**
- * acpi_viot_early_init - Test the presence of VIOT and enable ACS
- *
- * If the VIOT does exist, ACS must be enabled. This cannot be
- * done in acpi_viot_init() which is called after the bus scan
- */
-void __init acpi_viot_early_init(void)
-{
-#ifdef CONFIG_PCI
-	acpi_status status;
-	struct acpi_table_header *hdr;
-
-	status = acpi_get_table(ACPI_SIG_VIOT, 0, &hdr);
-	if (ACPI_FAILURE(status))
-		return;
-	pci_request_acs();
-	acpi_put_table(hdr);
-#endif
-}
-
-/**
  * acpi_viot_init - Parse the VIOT table
  *
  * Parse the VIOT table, prepare the list of endpoints to be used during DMA
@@ -313,7 +294,7 @@ static int viot_dev_iommu_init(struct device *dev, struct viot_iommu *viommu,
 		return -ENODEV;
 
 	/* We're not translating ourself */
-	if (device_match_fwnode(dev, viommu->fwnode))
+	if (viommu->fwnode == dev->fwnode)
 		return -EINVAL;
 
 	ops = iommu_ops_from_fwnode(viommu->fwnode);
@@ -337,6 +318,12 @@ static int viot_pci_dev_iommu_init(struct pci_dev *pdev, u16 dev_id, void *data)
 		    dev_id <= ep->bdf_end) {
 			epid = ((domain_nr - ep->segment_start) << 16) +
 				dev_id - ep->bdf_start + ep->endpoint_id;
+
+			/*
+			 * If we found a PCI range managed by the viommu, we're
+			 * the one that has to request ACS.
+			 */
+			pci_request_acs();
 
 			return viot_dev_iommu_init(&pdev->dev, ep->viommu,
 						   epid);

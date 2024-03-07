@@ -71,7 +71,6 @@ static void destroy_priv(struct kref *kref)
 
 	dev_dbg(&priv->usbdev->dev, "destroying priv datastructure\n");
 	usb_put_dev(priv->usbdev);
-	priv->usbdev = NULL;
 	kfree(priv);
 }
 
@@ -502,7 +501,7 @@ static size_t parport_uss720_epp_write_data(struct parport *pp, const void *buf,
 #else
 	struct parport_uss720_private *priv = pp->private_data;
 	struct usb_device *usbdev = priv->usbdev;
-	int rlen = 0;
+	int rlen;
 	int i;
 
 	if (!usbdev)
@@ -563,7 +562,7 @@ static size_t parport_uss720_ecp_write_data(struct parport *pp, const void *buff
 {
 	struct parport_uss720_private *priv = pp->private_data;
 	struct usb_device *usbdev = priv->usbdev;
-	int rlen = 0;
+	int rlen;
 	int i;
 
 	if (!usbdev)
@@ -581,7 +580,7 @@ static size_t parport_uss720_ecp_read_data(struct parport *pp, void *buffer, siz
 {
 	struct parport_uss720_private *priv = pp->private_data;
 	struct usb_device *usbdev = priv->usbdev;
-	int rlen = 0;
+	int rlen;
 	int i;
 
 	if (!usbdev)
@@ -614,7 +613,7 @@ static size_t parport_uss720_write_compat(struct parport *pp, const void *buffer
 {
 	struct parport_uss720_private *priv = pp->private_data;
 	struct usb_device *usbdev = priv->usbdev;
-	int rlen = 0;
+	int rlen;
 	int i;
 
 	if (!usbdev)
@@ -737,6 +736,7 @@ static int uss720_probe(struct usb_interface *intf,
 	parport_announce_port(pp);
 
 	usb_set_intfdata(intf, pp);
+	usb_put_dev(usbdev);
 	return 0;
 
 probe_abort:
@@ -754,6 +754,7 @@ static void uss720_disconnect(struct usb_interface *intf)
 	usb_set_intfdata(intf, NULL);
 	if (pp) {
 		priv = pp->private_data;
+		priv->usbdev = NULL;
 		priv->pp = NULL;
 		dev_dbg(&intf->dev, "parport_remove_port\n");
 		parport_remove_port(pp);

@@ -274,6 +274,14 @@ static void tpm_dev_release(struct device *dev)
 	kfree(chip);
 }
 
+static void tpm_devs_release(struct device *dev)
+{
+	struct tpm_chip *chip = container_of(dev, struct tpm_chip, devs);
+
+	/* release the master device reference */
+	put_device(&chip->dev);
+}
+
 /**
  * tpm_class_shutdown() - prepare the TPM device for loss of power.
  * @dev: device to which the chip is associated.
@@ -336,6 +344,7 @@ struct tpm_chip *tpm_chip_alloc(struct device *pdev,
 	chip->dev_num = rc;
 
 	device_initialize(&chip->dev);
+	device_initialize(&chip->devs);
 
 	chip->dev.class = tpm_class;
 	chip->dev.class->shutdown_pre = tpm_class_shutdown;
@@ -343,12 +352,29 @@ struct tpm_chip *tpm_chip_alloc(struct device *pdev,
 	chip->dev.parent = pdev;
 	chip->dev.groups = chip->groups;
 
+	chip->devs.parent = pdev;
+	chip->devs.class = tpmrm_class;
+	chip->devs.release = tpm_devs_release;
+	/* get extra reference on main device to hold on
+	 * behalf of devs.  This holds the chip structure
+	 * while cdevs is in use.  The corresponding put
+	 * is in the tpm_devs_release (TPM2 only)
+	 */
+	if (chip->flags & TPM_CHIP_FLAG_TPM2)
+		get_device(&chip->dev);
+
 	if (chip->dev_num == 0)
 		chip->dev.devt = MKDEV(MISC_MAJOR, TPM_MINOR);
 	else
 		chip->dev.devt = MKDEV(MAJOR(tpm_devt), chip->dev_num);
 
+	chip->devs.devt =
+		MKDEV(MAJOR(tpm_devt), chip->dev_num + TPM_NUM_DEVICES);
+
 	rc = dev_set_name(&chip->dev, "tpm%d", chip->dev_num);
+	if (rc)
+		goto out;
+	rc = dev_set_name(&chip->devs, "tpmrm%d", chip->dev_num);
 	if (rc)
 		goto out;
 
@@ -356,7 +382,9 @@ struct tpm_chip *tpm_chip_alloc(struct device *pdev,
 		chip->flags |= TPM_CHIP_FLAG_VIRTUAL;
 
 	cdev_init(&chip->cdev, &tpm_fops);
+	cdev_init(&chip->cdevs, &tpmrm_fops);
 	chip->cdev.owner = THIS_MODULE;
+	chip->cdevs.owner = THIS_MODULE;
 
 	rc = tpm2_init_space(&chip->work_space, TPM2_SPACE_BUFFER_SIZE);
 	if (rc) {
@@ -368,15 +396,11 @@ struct tpm_chip *tpm_chip_alloc(struct device *pdev,
 	return chip;
 
 out:
+	put_device(&chip->devs);
 	put_device(&chip->dev);
 	return ERR_PTR(rc);
 }
 EXPORT_SYMBOL_GPL(tpm_chip_alloc);
-
-static void tpm_put_device(void *dev)
-{
-	put_device(dev);
-}
 
 /**
  * tpmm_chip_alloc() - allocate a new struct tpm_chip instance
@@ -396,7 +420,7 @@ struct tpm_chip *tpmm_chip_alloc(struct device *pdev,
 		return chip;
 
 	rc = devm_add_action_or_reset(pdev,
-				      tpm_put_device,
+				      (void (*)(void *)) put_device,
 				      &chip->dev);
 	if (rc)
 		return ERR_PTR(rc);
@@ -420,10 +444,15 @@ static int tpm_add_char_device(struct tpm_chip *chip)
 		return rc;
 	}
 
-	if (chip->flags & TPM_CHIP_FLAG_TPM2 && !tpm_is_firmware_upgrade(chip)) {
-		rc = tpm_devs_add(chip);
-		if (rc)
-			goto err_del_cdev;
+	if (chip->flags & TPM_CHIP_FLAG_TPM2) {
+		rc = cdev_device_add(&chip->cdevs, &chip->devs);
+		if (rc) {
+			dev_err(&chip->devs,
+				"unable to cdev_device_add() %s, major %d, minor %d, err=%d\n",
+				dev_name(&chip->devs), MAJOR(chip->devs.devt),
+				MINOR(chip->devs.devt), rc);
+			return rc;
+		}
 	}
 
 	/* Make the chip available. */
@@ -431,10 +460,6 @@ static int tpm_add_char_device(struct tpm_chip *chip)
 	idr_replace(&dev_nums_idr, chip, chip->dev_num);
 	mutex_unlock(&idr_lock);
 
-	return 0;
-
-err_del_cdev:
-	cdev_device_del(&chip->cdev, &chip->dev);
 	return rc;
 }
 
@@ -471,8 +496,7 @@ static void tpm_del_legacy_sysfs(struct tpm_chip *chip)
 {
 	struct attribute **i;
 
-	if (chip->flags & (TPM_CHIP_FLAG_TPM2 | TPM_CHIP_FLAG_VIRTUAL) ||
-	    tpm_is_firmware_upgrade(chip))
+	if (chip->flags & (TPM_CHIP_FLAG_TPM2 | TPM_CHIP_FLAG_VIRTUAL))
 		return;
 
 	sysfs_remove_link(&chip->dev.parent->kobj, "ppi");
@@ -490,8 +514,7 @@ static int tpm_add_legacy_sysfs(struct tpm_chip *chip)
 	struct attribute **i;
 	int rc;
 
-	if (chip->flags & (TPM_CHIP_FLAG_TPM2 | TPM_CHIP_FLAG_VIRTUAL) ||
-		tpm_is_firmware_upgrade(chip))
+	if (chip->flags & (TPM_CHIP_FLAG_TPM2 | TPM_CHIP_FLAG_VIRTUAL))
 		return 0;
 
 	rc = compat_only_sysfs_link_entry_to_kobj(
@@ -521,7 +544,7 @@ static int tpm_hwrng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 
 static int tpm_add_hwrng(struct tpm_chip *chip)
 {
-	if (!IS_ENABLED(CONFIG_HW_RANDOM_TPM) || tpm_is_firmware_upgrade(chip))
+	if (!IS_ENABLED(CONFIG_HW_RANDOM_TPM))
 		return 0;
 
 	snprintf(chip->hwrng_name, sizeof(chip->hwrng_name),
@@ -534,9 +557,6 @@ static int tpm_add_hwrng(struct tpm_chip *chip)
 static int tpm_get_pcr_allocation(struct tpm_chip *chip)
 {
 	int rc;
-
-	if (tpm_is_firmware_upgrade(chip))
-		return 0;
 
 	rc = (chip->flags & TPM_CHIP_FLAG_TPM2) ?
 	     tpm2_get_pcr_allocation(chip) :
@@ -600,7 +620,7 @@ int tpm_chip_register(struct tpm_chip *chip)
 	return 0;
 
 out_hwrng:
-	if (IS_ENABLED(CONFIG_HW_RANDOM_TPM) && !tpm_is_firmware_upgrade(chip))
+	if (IS_ENABLED(CONFIG_HW_RANDOM_TPM))
 		hwrng_unregister(&chip->hwrng);
 out_ppi:
 	tpm_bios_log_teardown(chip);
@@ -625,11 +645,11 @@ EXPORT_SYMBOL_GPL(tpm_chip_register);
 void tpm_chip_unregister(struct tpm_chip *chip)
 {
 	tpm_del_legacy_sysfs(chip);
-	if (IS_ENABLED(CONFIG_HW_RANDOM_TPM) && !tpm_is_firmware_upgrade(chip))
+	if (IS_ENABLED(CONFIG_HW_RANDOM_TPM))
 		hwrng_unregister(&chip->hwrng);
 	tpm_bios_log_teardown(chip);
-	if (chip->flags & TPM_CHIP_FLAG_TPM2 && !tpm_is_firmware_upgrade(chip))
-		tpm_devs_remove(chip);
+	if (chip->flags & TPM_CHIP_FLAG_TPM2)
+		cdev_device_del(&chip->cdevs, &chip->devs);
 	tpm_del_char_device(chip);
 }
 EXPORT_SYMBOL_GPL(tpm_chip_unregister);

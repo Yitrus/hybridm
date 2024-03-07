@@ -494,7 +494,8 @@ static const struct v4l2_subdev_ops s2250_ops = {
 
 /* --------------------------------------------------------------------------*/
 
-static int s2250_probe(struct i2c_client *client)
+static int s2250_probe(struct i2c_client *client,
+		       const struct i2c_device_id *id)
 {
 	struct i2c_client *audio;
 	struct i2c_adapter *adapter = client->adapter;
@@ -503,7 +504,6 @@ static int s2250_probe(struct i2c_client *client)
 	u8 *data;
 	struct go7007 *go = i2c_get_adapdata(adapter);
 	struct go7007_usb *usb = go->hpi_context;
-	int err = -EIO;
 
 	audio = i2c_new_dummy_device(adapter, TLV320_ADDRESS >> 1);
 	if (IS_ERR(audio))
@@ -532,8 +532,11 @@ static int s2250_probe(struct i2c_client *client)
 		V4L2_CID_HUE, -512, 511, 1, 0);
 	sd->ctrl_handler = &state->hdl;
 	if (state->hdl.error) {
-		err = state->hdl.error;
-		goto fail;
+		int err = state->hdl.error;
+
+		v4l2_ctrl_handler_free(&state->hdl);
+		kfree(state);
+		return err;
 	}
 
 	state->std = V4L2_STD_NTSC;
@@ -597,10 +600,10 @@ fail:
 	i2c_unregister_device(audio);
 	v4l2_ctrl_handler_free(&state->hdl);
 	kfree(state);
-	return err;
+	return -EIO;
 }
 
-static void s2250_remove(struct i2c_client *client)
+static int s2250_remove(struct i2c_client *client)
 {
 	struct s2250 *state = to_state(i2c_get_clientdata(client));
 
@@ -608,6 +611,7 @@ static void s2250_remove(struct i2c_client *client)
 	v4l2_device_unregister_subdev(&state->sd);
 	v4l2_ctrl_handler_free(&state->hdl);
 	kfree(state);
+	return 0;
 }
 
 static const struct i2c_device_id s2250_id[] = {
@@ -620,7 +624,7 @@ static struct i2c_driver s2250_driver = {
 	.driver = {
 		.name	= "s2250",
 	},
-	.probe_new	= s2250_probe,
+	.probe		= s2250_probe,
 	.remove		= s2250_remove,
 	.id_table	= s2250_id,
 };

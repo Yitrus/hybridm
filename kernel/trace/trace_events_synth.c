@@ -17,8 +17,6 @@
 /* for gfp flag names */
 #include <linux/trace_events.h>
 #include <trace/events/mmflags.h>
-#include "trace_probe.h"
-#include "trace_probe_kernel.h"
 
 #include "trace_synth.h"
 
@@ -44,13 +42,10 @@ enum { ERRORS };
 
 static const char *err_text[] = { ERRORS };
 
-static char *last_cmd;
+static char last_cmd[MAX_FILTER_STR_VAL];
 
 static int errpos(const char *str)
 {
-	if (!str || !last_cmd)
-		return 0;
-
 	return err_pos(last_cmd, str);
 }
 
@@ -59,16 +54,11 @@ static void last_cmd_set(const char *str)
 	if (!str)
 		return;
 
-	kfree(last_cmd);
-
-	last_cmd = kstrdup(str, GFP_KERNEL);
+	strncpy(last_cmd, str, MAX_FILTER_STR_VAL - 1);
 }
 
-static void synth_err(u8 err_type, u16 err_pos)
+static void synth_err(u8 err_type, u8 err_pos)
 {
-	if (!last_cmd)
-		return;
-
 	tracing_log_err(NULL, "synthetic_events", last_cmd, err_text,
 			err_type, err_pos);
 }
@@ -411,7 +401,6 @@ static unsigned int trace_string(struct synth_trace_event *entry,
 {
 	unsigned int len = 0;
 	char *str_field;
-	int ret;
 
 	if (is_dynamic) {
 		u32 data_offset;
@@ -420,27 +409,19 @@ static unsigned int trace_string(struct synth_trace_event *entry,
 		data_offset += event->n_u64 * sizeof(u64);
 		data_offset += data_size;
 
-		len = kern_fetch_store_strlen((unsigned long)str_val);
+		str_field = (char *)entry + data_offset;
+
+		len = strlen(str_val) + 1;
+		strscpy(str_field, str_val, len);
 
 		data_offset |= len << 16;
 		*(u32 *)&entry->fields[*n_u64] = data_offset;
-
-		ret = kern_fetch_store_string((unsigned long)str_val, &entry->fields[*n_u64], entry);
 
 		(*n_u64)++;
 	} else {
 		str_field = (char *)&entry->fields[*n_u64];
 
-#ifdef CONFIG_ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE
-		if ((unsigned long)str_val < TASK_SIZE)
-			ret = strncpy_from_user_nofault(str_field, str_val, STR_VAR_LEN_MAX);
-		else
-#endif
-			ret = strncpy_from_kernel_nofault(str_field, str_val, STR_VAR_LEN_MAX);
-
-		if (ret < 0)
-			strcpy(str_field, FAULT_STRING);
-
+		strscpy(str_field, str_val, STR_VAR_LEN_MAX);
 		(*n_u64) += STR_VAR_LEN_MAX / sizeof(u64);
 	}
 
@@ -473,7 +454,7 @@ static notrace void trace_event_raw_event_synth(void *__data,
 		val_idx = var_ref_idx[field_pos];
 		str_val = (char *)(long)var_ref_vals[val_idx];
 
-		len = kern_fetch_store_strlen((unsigned long)str_val);
+		len = strlen(str_val) + 1;
 
 		fields_size += len;
 	}
@@ -828,9 +809,10 @@ static int register_synth_event(struct synth_event *event)
 	}
 
 	ret = set_synth_event_print_fmt(call);
-	/* unregister_trace_event() will be called inside */
-	if (ret < 0)
+	if (ret < 0) {
 		trace_remove_event_call(call);
+		goto err;
+	}
  out:
 	return ret;
  err:
@@ -1255,8 +1237,9 @@ static int __create_synth_event(const char *name, const char *raw_fields)
 						  argv + consumed, &consumed,
 						  &field_version);
 			if (IS_ERR(field)) {
+				argv_free(argv);
 				ret = PTR_ERR(field);
-				goto err_free_arg;
+				goto err;
 			}
 
 			/*
@@ -1279,19 +1262,18 @@ static int __create_synth_event(const char *name, const char *raw_fields)
 			if (cmd_version > 1 && n_fields_this_loop >= 1) {
 				synth_err(SYNTH_ERR_INVALID_CMD, errpos(field_str));
 				ret = -EINVAL;
-				goto err_free_arg;
+				goto err;
 			}
 
+			fields[n_fields++] = field;
 			if (n_fields == SYNTH_FIELDS_MAX) {
 				synth_err(SYNTH_ERR_TOO_MANY_FIELDS, 0);
 				ret = -EINVAL;
-				goto err_free_arg;
+				goto err;
 			}
-			fields[n_fields++] = field;
 
 			n_fields_this_loop++;
 		}
-		argv_free(argv);
 
 		if (consumed < argc) {
 			synth_err(SYNTH_ERR_INVALID_CMD, 0);
@@ -1299,6 +1281,7 @@ static int __create_synth_event(const char *name, const char *raw_fields)
 			goto err;
 		}
 
+		argv_free(argv);
 	}
 
 	if (n_fields == 0) {
@@ -1324,8 +1307,6 @@ static int __create_synth_event(const char *name, const char *raw_fields)
 	kfree(saved_fields);
 
 	return ret;
- err_free_arg:
-	argv_free(argv);
  err:
 	for (i = 0; i < n_fields; i++)
 		free_synth_field(fields[i]);
@@ -1425,6 +1406,7 @@ int synth_event_delete(const char *event_name)
 	mutex_unlock(&event_mutex);
 
 	if (mod) {
+		mutex_lock(&trace_types_lock);
 		/*
 		 * It is safest to reset the ring buffer if the module
 		 * being unloaded registered any events that were
@@ -1436,6 +1418,7 @@ int synth_event_delete(const char *event_name)
 		 * occur.
 		 */
 		tracing_reset_all_online_cpus();
+		mutex_unlock(&trace_types_lock);
 	}
 
 	return ret;
@@ -1995,7 +1978,7 @@ EXPORT_SYMBOL_GPL(synth_event_add_next_val);
 /**
  * synth_event_add_val - Add a named field's value to an open synth trace
  * @field_name: The name of the synthetic event field value to set
- * @val: The value to set the named field to
+ * @val: The value to set the next field to
  * @trace_state: A pointer to object tracking the piecewise trace state
  *
  * Set the value of the named field in an event that's been opened by
@@ -2070,13 +2053,6 @@ static int create_synth_event(const char *raw_command)
 
 	last_cmd_set(raw_command);
 
-	name = raw_command;
-
-	/* Don't try to process if not our system */
-	if (name[0] != 's' || name[1] != ':')
-		return -ECANCELED;
-	name += 2;
-
 	p = strpbrk(raw_command, " \t");
 	if (!p) {
 		synth_err(SYNTH_ERR_INVALID_CMD, 0);
@@ -2084,6 +2060,12 @@ static int create_synth_event(const char *raw_command)
 	}
 
 	fields = skip_spaces(p);
+
+	name = raw_command;
+
+	if (name[0] != 's' || name[1] != ':')
+		return -ECANCELED;
+	name += 2;
 
 	/* This interface accepts group name prefix */
 	if (strchr(name, '/')) {

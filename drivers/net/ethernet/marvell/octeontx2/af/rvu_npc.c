@@ -15,7 +15,6 @@
 #include "npc.h"
 #include "cgx.h"
 #include "npc_profile.h"
-#include "rvu_npc_hash.h"
 
 #define RSVD_MCAM_ENTRIES_PER_PF	3 /* Broadcast, Promisc and AllMulticast */
 #define RSVD_MCAM_ENTRIES_PER_NIXLF	1 /* Ucast for LFs */
@@ -606,7 +605,7 @@ void rvu_npc_install_ucast_entry(struct rvu *rvu, u16 pcifunc,
 	struct npc_install_flow_req req = { 0 };
 	struct npc_install_flow_rsp rsp = { 0 };
 	struct npc_mcam *mcam = &rvu->hw->mcam;
-	struct nix_rx_action action = { 0 };
+	struct nix_rx_action action;
 	int blkaddr, index;
 
 	/* AF's and SDP VFs work in promiscuous mode */
@@ -615,12 +614,6 @@ void rvu_npc_install_ucast_entry(struct rvu *rvu, u16 pcifunc,
 
 	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, 0);
 	if (blkaddr < 0)
-		return;
-
-	/* Ucast rule should not be installed if DMAC
-	 * extraction is not supported by the profile.
-	 */
-	if (!npc_is_feature_supported(rvu, BIT_ULL(NPC_DMAC), pfvf->nix_rx_intf))
 		return;
 
 	index = npc_get_nixlf_mcam_index(mcam, pcifunc,
@@ -633,6 +626,7 @@ void rvu_npc_install_ucast_entry(struct rvu *rvu, u16 pcifunc,
 		*(u64 *)&action = npc_get_mcam_action(rvu, mcam,
 						      blkaddr, index);
 	} else {
+		*(u64 *)&action = 0x00;
 		action.op = NIX_RX_ACTIONOP_UCAST;
 		action.pf_func = pcifunc;
 	}
@@ -663,7 +657,7 @@ void rvu_npc_install_promisc_entry(struct rvu *rvu, u16 pcifunc,
 	struct npc_mcam *mcam = &rvu->hw->mcam;
 	struct rvu_hwinfo *hw = rvu->hw;
 	int blkaddr, ucast_idx, index;
-	struct nix_rx_action action = { 0 };
+	struct nix_rx_action action;
 	u64 relaxed_mask;
 
 	if (!hw->cap.nix_rx_multicast && is_cgx_vf(rvu, pcifunc))
@@ -691,14 +685,14 @@ void rvu_npc_install_promisc_entry(struct rvu *rvu, u16 pcifunc,
 						      blkaddr, ucast_idx);
 
 	if (action.op != NIX_RX_ACTIONOP_RSS) {
-		*(u64 *)&action = 0;
+		*(u64 *)&action = 0x00;
 		action.op = NIX_RX_ACTIONOP_UCAST;
 	}
 
 	/* RX_ACTION set to MCAST for CGX PF's */
 	if (hw->cap.nix_rx_multicast && pfvf->use_mce_list &&
 	    is_pf_cgxmapped(rvu, rvu_get_pf(pcifunc))) {
-		*(u64 *)&action = 0;
+		*(u64 *)&action = 0x00;
 		action.op = NIX_RX_ACTIONOP_MCAST;
 		pfvf = rvu_get_pfvf(rvu, pcifunc & ~RVU_PFVF_FUNC_MASK);
 		action.index = pfvf->promisc_mce_idx;
@@ -784,14 +778,6 @@ void rvu_npc_install_bcast_match_entry(struct rvu *rvu, u16 pcifunc,
 	/* Get 'pcifunc' of PF device */
 	pcifunc = pcifunc & ~RVU_PFVF_FUNC_MASK;
 	pfvf = rvu_get_pfvf(rvu, pcifunc);
-
-	/* Bcast rule should not be installed if both DMAC
-	 * and LXMB extraction is not supported by the profile.
-	 */
-	if (!npc_is_feature_supported(rvu, BIT_ULL(NPC_DMAC), pfvf->nix_rx_intf) &&
-	    !npc_is_feature_supported(rvu, BIT_ULL(NPC_LXMB), pfvf->nix_rx_intf))
-		return;
-
 	index = npc_get_nixlf_mcam_index(mcam, pcifunc,
 					 nixlf, NIXLF_BCAST_ENTRY);
 
@@ -846,7 +832,7 @@ void rvu_npc_install_allmulti_entry(struct rvu *rvu, u16 pcifunc, int nixlf,
 	struct rvu_hwinfo *hw = rvu->hw;
 	int blkaddr, ucast_idx, index;
 	u8 mac_addr[ETH_ALEN] = { 0 };
-	struct nix_rx_action action = { 0 };
+	struct nix_rx_action action;
 	struct rvu_pfvf *pfvf;
 	u16 vf_func;
 
@@ -862,14 +848,6 @@ void rvu_npc_install_allmulti_entry(struct rvu *rvu, u16 pcifunc, int nixlf,
 	vf_func = pcifunc & RVU_PFVF_FUNC_MASK;
 	pcifunc = pcifunc & ~RVU_PFVF_FUNC_MASK;
 	pfvf = rvu_get_pfvf(rvu, pcifunc);
-
-	/* Mcast rule should not be installed if both DMAC
-	 * and LXMB extraction is not supported by the profile.
-	 */
-	if (!npc_is_feature_supported(rvu, BIT_ULL(NPC_DMAC), pfvf->nix_rx_intf) &&
-	    !npc_is_feature_supported(rvu, BIT_ULL(NPC_LXMB), pfvf->nix_rx_intf))
-		return;
-
 	index = npc_get_nixlf_mcam_index(mcam, pcifunc,
 					 nixlf, NIXLF_ALLMULTI_ENTRY);
 
@@ -883,14 +861,14 @@ void rvu_npc_install_allmulti_entry(struct rvu *rvu, u16 pcifunc, int nixlf,
 							blkaddr, ucast_idx);
 
 	if (action.op != NIX_RX_ACTIONOP_RSS) {
-		*(u64 *)&action = 0;
+		*(u64 *)&action = 0x00;
 		action.op = NIX_RX_ACTIONOP_UCAST;
 		action.pf_func = pcifunc;
 	}
 
 	/* RX_ACTION set to MCAST for CGX PF's */
 	if (hw->cap.nix_rx_multicast && pfvf->use_mce_list) {
-		*(u64 *)&action = 0;
+		*(u64 *)&action = 0x00;
 		action.op = NIX_RX_ACTIONOP_MCAST;
 		action.index = pfvf->mcast_mce_idx;
 	}
@@ -1119,9 +1097,6 @@ static void npc_enadis_default_entries(struct rvu *rvu, u16 pcifunc,
 
 void rvu_npc_disable_default_entries(struct rvu *rvu, u16 pcifunc, int nixlf)
 {
-	if (nixlf < 0)
-		return;
-
 	npc_enadis_default_entries(rvu, pcifunc, nixlf, false);
 
 	/* Delete multicast and promisc MCAM entries */
@@ -1131,39 +1106,8 @@ void rvu_npc_disable_default_entries(struct rvu *rvu, u16 pcifunc, int nixlf)
 				     NIXLF_PROMISC_ENTRY, false);
 }
 
-bool rvu_npc_enable_mcam_by_entry_index(struct rvu *rvu, int entry, int intf, bool enable)
-{
-	int blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, 0);
-	struct npc_mcam *mcam = &rvu->hw->mcam;
-	struct rvu_npc_mcam_rule *rule, *tmp;
-
-	mutex_lock(&mcam->lock);
-
-	list_for_each_entry_safe(rule, tmp, &mcam->mcam_rules, list) {
-		if (rule->intf != intf)
-			continue;
-
-		if (rule->entry != entry)
-			continue;
-
-		rule->enable = enable;
-		mutex_unlock(&mcam->lock);
-
-		npc_enable_mcam_entry(rvu, mcam, blkaddr,
-				      entry, enable);
-
-		return true;
-	}
-
-	mutex_unlock(&mcam->lock);
-	return false;
-}
-
 void rvu_npc_enable_default_entries(struct rvu *rvu, u16 pcifunc, int nixlf)
 {
-	if (nixlf < 0)
-		return;
-
 	/* Enables only broadcast match entry. Promisc/Allmulti are enabled
 	 * in set_rx_mode mbox handler.
 	 */
@@ -1238,6 +1182,14 @@ void rvu_npc_free_mcam_entries(struct rvu *rvu, u16 pcifunc, int nixlf)
 	rvu_npc_disable_default_entries(rvu, pcifunc, nixlf);
 }
 
+#define SET_KEX_LD(intf, lid, ltype, ld, cfg)	\
+	rvu_write64(rvu, blkaddr,			\
+		NPC_AF_INTFX_LIDX_LTX_LDX_CFG(intf, lid, ltype, ld), cfg)
+
+#define SET_KEX_LDFLAGS(intf, ld, flags, cfg)	\
+	rvu_write64(rvu, blkaddr,			\
+		NPC_AF_INTFX_LDATAX_FLAGSX_CFG(intf, ld, flags), cfg)
+
 static void npc_program_mkex_rx(struct rvu *rvu, int blkaddr,
 				struct npc_mcam_kex *mkex, u8 intf)
 {
@@ -1311,9 +1263,6 @@ static void npc_program_mkex_profile(struct rvu *rvu, int blkaddr,
 		npc_program_mkex_rx(rvu, blkaddr, mkex, intf);
 		npc_program_mkex_tx(rvu, blkaddr, mkex, intf);
 	}
-
-	/* Programme mkex hash profile */
-	npc_program_mkex_hash(rvu, blkaddr);
 }
 
 static int npc_fwdb_prfl_img_map(struct rvu *rvu, void __iomem **prfl_img_addr,
@@ -1515,7 +1464,6 @@ static int npc_prepare_default_kpu(struct npc_kpu_profile_adapter *profile)
 	profile->kpus = ARRAY_SIZE(npc_kpu_profiles);
 	profile->lt_def = &npc_lt_defaults;
 	profile->mkex = &npc_mkex_default;
-	profile->mkex_hash = &npc_mkex_hash_default;
 
 	return 0;
 }
@@ -1703,7 +1651,7 @@ static void npc_load_kpu_profile(struct rvu *rvu)
 	 * Firmware database method.
 	 * Default KPU profile.
 	 */
-	if (!request_firmware_direct(&fw, kpu_profile, rvu->dev)) {
+	if (!request_firmware(&fw, kpu_profile, rvu->dev)) {
 		dev_info(rvu->dev, "Loading KPU profile from firmware: %s\n",
 			 kpu_profile);
 		rvu->kpu_fwdata = kzalloc(fw->size, GFP_KERNEL);
@@ -1872,6 +1820,7 @@ static int npc_mcam_rsrcs_init(struct rvu *rvu, int blkaddr)
 	mcam->hprio_count = mcam->lprio_count;
 	mcam->hprio_end = mcam->hprio_count;
 
+
 	/* Allocate bitmap for managing MCAM counters and memory
 	 * for saving counter to RVU PFFUNC allocation mapping.
 	 */
@@ -1967,7 +1916,6 @@ static void rvu_npc_hw_init(struct rvu *rvu, int blkaddr)
 
 static void rvu_npc_setup_interfaces(struct rvu *rvu, int blkaddr)
 {
-	struct npc_mcam_kex *mkex = rvu->kpu.mkex;
 	struct npc_mcam *mcam = &rvu->hw->mcam;
 	struct rvu_hwinfo *hw = rvu->hw;
 	u64 nibble_ena, rx_kex, tx_kex;
@@ -1980,15 +1928,15 @@ static void rvu_npc_setup_interfaces(struct rvu *rvu, int blkaddr)
 	mcam->counters.max--;
 	mcam->rx_miss_act_cntr = mcam->counters.max;
 
-	rx_kex = mkex->keyx_cfg[NIX_INTF_RX];
-	tx_kex = mkex->keyx_cfg[NIX_INTF_TX];
+	rx_kex = npc_mkex_default.keyx_cfg[NIX_INTF_RX];
+	tx_kex = npc_mkex_default.keyx_cfg[NIX_INTF_TX];
 	nibble_ena = FIELD_GET(NPC_PARSE_NIBBLE, rx_kex);
 
 	nibble_ena = rvu_npc_get_tx_nibble_cfg(rvu, nibble_ena);
 	if (nibble_ena) {
 		tx_kex &= ~NPC_PARSE_NIBBLE;
 		tx_kex |= FIELD_PREP(NPC_PARSE_NIBBLE, nibble_ena);
-		mkex->keyx_cfg[NIX_INTF_TX] = tx_kex;
+		npc_mkex_default.keyx_cfg[NIX_INTF_TX] = tx_kex;
 	}
 
 	/* Configure RX interfaces */
@@ -2100,7 +2048,6 @@ int rvu_npc_init(struct rvu *rvu)
 
 	rvu_npc_setup_interfaces(rvu, blkaddr);
 
-	npc_config_secret_key(rvu, blkaddr);
 	/* Configure MKEX profile */
 	npc_load_mkex_profile(rvu, blkaddr, rvu->mkex_pfl_name);
 
@@ -2519,7 +2466,9 @@ alloc:
 		bmap = mcam->bmap_reverse;
 		start = mcam->bmap_entries - start;
 		end = mcam->bmap_entries - end;
-		swap(start, end);
+		index = start;
+		start = end;
+		end = index;
 	} else {
 		bmap = mcam->bmap;
 	}
@@ -2588,7 +2537,7 @@ alloc:
 
 	/* Copy MCAM entry indices into mbox response entry_list.
 	 * Requester always expects indices in ascending order, so
-	 * reverse the list if reverse bitmap is used for allocation.
+	 * so reverse the list if reverse bitmap is used for allocation.
 	 */
 	if (!req->contig && rsp->count) {
 		index = 0;
@@ -2614,14 +2563,6 @@ alloc:
 
 	mutex_unlock(&mcam->lock);
 	return 0;
-}
-
-/* Marks bitmaps to reserved the mcam slot */
-void npc_mcam_rsrcs_reserve(struct rvu *rvu, int blkaddr, int entry_idx)
-{
-	struct npc_mcam *mcam = &rvu->hw->mcam;
-
-	npc_mcam_set_bit(mcam, entry_idx);
 }
 
 int rvu_mbox_handler_npc_mcam_alloc_entry(struct rvu *rvu,
@@ -3240,102 +3181,6 @@ int rvu_mbox_handler_npc_get_kex_cfg(struct rvu *rvu, struct msg_req *req,
 	}
 	memcpy(rsp->mkex_pfl_name, rvu->mkex_pfl_name, MKEX_NAME_LEN);
 	return 0;
-}
-
-static int
-npc_set_var_len_offset_pkind(struct rvu *rvu, u16 pcifunc, u64 pkind,
-			     u8 var_len_off, u8 var_len_off_mask, u8 shift_dir)
-{
-	struct npc_kpu_action0 *act0;
-	u8 shift_count = 0;
-	int blkaddr;
-	u64 val;
-
-	if (!var_len_off_mask)
-		return -EINVAL;
-
-	if (var_len_off_mask != 0xff) {
-		if (shift_dir)
-			shift_count = __ffs(var_len_off_mask);
-		else
-			shift_count = (8 - __fls(var_len_off_mask));
-	}
-	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, pcifunc);
-	if (blkaddr < 0) {
-		dev_err(rvu->dev, "%s: NPC block not implemented\n", __func__);
-		return -EINVAL;
-	}
-	val = rvu_read64(rvu, blkaddr, NPC_AF_PKINDX_ACTION0(pkind));
-	act0 = (struct npc_kpu_action0 *)&val;
-	act0->var_len_shift = shift_count;
-	act0->var_len_right = shift_dir;
-	act0->var_len_mask = var_len_off_mask;
-	act0->var_len_offset = var_len_off;
-	rvu_write64(rvu, blkaddr, NPC_AF_PKINDX_ACTION0(pkind), val);
-	return 0;
-}
-
-int rvu_npc_set_parse_mode(struct rvu *rvu, u16 pcifunc, u64 mode, u8 dir,
-			   u64 pkind, u8 var_len_off, u8 var_len_off_mask,
-			   u8 shift_dir)
-
-{
-	struct rvu_pfvf *pfvf = rvu_get_pfvf(rvu, pcifunc);
-	int blkaddr, nixlf, rc, intf_mode;
-	int pf = rvu_get_pf(pcifunc);
-	u64 rxpkind, txpkind;
-	u8 cgx_id, lmac_id;
-
-	/* use default pkind to disable edsa/higig */
-	rxpkind = rvu_npc_get_pkind(rvu, pf);
-	txpkind = NPC_TX_DEF_PKIND;
-	intf_mode = NPC_INTF_MODE_DEF;
-
-	if (mode & OTX2_PRIV_FLAGS_CUSTOM) {
-		if (pkind == NPC_RX_CUSTOM_PRE_L2_PKIND) {
-			rc = npc_set_var_len_offset_pkind(rvu, pcifunc, pkind,
-							  var_len_off,
-							  var_len_off_mask,
-							  shift_dir);
-			if (rc)
-				return rc;
-		}
-		rxpkind = pkind;
-		txpkind = pkind;
-	}
-
-	if (dir & PKIND_RX) {
-		/* rx pkind set req valid only for cgx mapped PFs */
-		if (!is_cgx_config_permitted(rvu, pcifunc))
-			return 0;
-		rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_id, &lmac_id);
-
-		rc = cgx_set_pkind(rvu_cgx_pdata(cgx_id, rvu), lmac_id,
-				   rxpkind);
-		if (rc)
-			return rc;
-	}
-
-	if (dir & PKIND_TX) {
-		/* Tx pkind set request valid if PCIFUNC has NIXLF attached */
-		rc = nix_get_nixlf(rvu, pcifunc, &nixlf, &blkaddr);
-		if (rc)
-			return rc;
-
-		rvu_write64(rvu, blkaddr, NIX_AF_LFX_TX_PARSE_CFG(nixlf),
-			    txpkind);
-	}
-
-	pfvf->intf_mode = intf_mode;
-	return 0;
-}
-
-int rvu_mbox_handler_npc_set_pkind(struct rvu *rvu, struct npc_set_pkind *req,
-				   struct msg_rsp *rsp)
-{
-	return rvu_npc_set_parse_mode(rvu, req->hdr.pcifunc, req->mode,
-				      req->dir, req->pkind, req->var_len_off,
-				      req->var_len_off_mask, req->shift_dir);
 }
 
 int rvu_mbox_handler_npc_read_base_steer_rule(struct rvu *rvu,

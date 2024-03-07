@@ -390,11 +390,12 @@ int iscsit_tpg_disable_portal_group(struct iscsi_portal_group *tpg, int force)
 }
 
 struct iscsi_node_attrib *iscsit_tpg_get_node_attrib(
-	struct iscsit_session *sess)
+	struct iscsi_session *sess)
 {
 	struct se_session *se_sess = sess->se_sess;
 	struct se_node_acl *se_nacl = se_sess->se_node_acl;
-	struct iscsi_node_acl *acl = to_iscsi_nacl(se_nacl);
+	struct iscsi_node_acl *acl = container_of(se_nacl, struct iscsi_node_acl,
+					se_node_acl);
 
 	return &acl->node_attrib;
 }
@@ -442,9 +443,6 @@ static bool iscsit_tpg_check_network_portal(
 				break;
 		}
 		spin_unlock(&tpg->tpg_np_lock);
-
-		if (match)
-			break;
 	}
 	spin_unlock(&tiqn->tiqn_tpg_lock);
 

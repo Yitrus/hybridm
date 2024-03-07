@@ -275,7 +275,7 @@ l1oip_socket_send(struct l1oip *hc, u8 localcodec, u8 channel, u32 chanmask,
 	p = frame;
 
 	/* restart timer */
-	if (time_before(hc->keep_tl.expires, jiffies + 5 * HZ) && !hc->shutdown)
+	if (time_before(hc->keep_tl.expires, jiffies + 5 * HZ))
 		mod_timer(&hc->keep_tl, jiffies + L1OIP_KEEPALIVE * HZ);
 	else
 		hc->keep_tl.expires = jiffies + L1OIP_KEEPALIVE * HZ;
@@ -601,9 +601,7 @@ multiframe:
 		goto multiframe;
 
 	/* restart timer */
-	if ((time_before(hc->timeout_tl.expires, jiffies + 5 * HZ) ||
-	     !hc->timeout_on) &&
-	    !hc->shutdown) {
+	if (time_before(hc->timeout_tl.expires, jiffies + 5 * HZ) || !hc->timeout_on) {
 		hc->timeout_on = 1;
 		mod_timer(&hc->timeout_tl, jiffies + L1OIP_TIMEOUT * HZ);
 	} else /* only adjust timer */
@@ -706,7 +704,7 @@ l1oip_socket_thread(void *data)
 		printk(KERN_DEBUG "%s: socket created and open\n",
 		       __func__);
 	while (!signal_pending(current)) {
-		iov_iter_kvec(&msg.msg_iter, ITER_DEST, &iov, 1, recvbuf_size);
+		iov_iter_kvec(&msg.msg_iter, READ, &iov, 1, recvbuf_size);
 		recvlen = sock_recvmsg(socket, &msg, 0);
 		if (recvlen > 0) {
 			l1oip_socket_parse(hc, &sin_rx, recvbuf, recvlen);
@@ -1234,10 +1232,11 @@ release_card(struct l1oip *hc)
 {
 	int	ch;
 
-	hc->shutdown = true;
+	if (timer_pending(&hc->keep_tl))
+		del_timer(&hc->keep_tl);
 
-	timer_shutdown_sync(&hc->keep_tl);
-	timer_shutdown_sync(&hc->timeout_tl);
+	if (timer_pending(&hc->timeout_tl))
+		del_timer(&hc->timeout_tl);
 
 	cancel_work_sync(&hc->workq);
 

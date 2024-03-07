@@ -124,6 +124,7 @@ teql_reset(struct Qdisc *sch)
 	struct teql_sched_data *dat = qdisc_priv(sch);
 
 	skb_queue_purge(&dat->q);
+	sch->q.qlen = 0;
 }
 
 static void
@@ -491,7 +492,7 @@ static int __init teql_init(void)
 
 		master = netdev_priv(dev);
 
-		strscpy(master->qops.id, dev->name, IFNAMSIZ);
+		strlcpy(master->qops.id, dev->name, IFNAMSIZ);
 		err = register_qdisc(&master->qops);
 
 		if (err) {

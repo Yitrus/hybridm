@@ -203,7 +203,6 @@ static void ipcomp_free_scratches(void)
 		vfree(*per_cpu_ptr(scratches, i));
 
 	free_percpu(scratches);
-	ipcomp_scratches = NULL;
 }
 
 static void * __percpu *ipcomp_alloc_scratches(void)
@@ -326,22 +325,18 @@ void ipcomp_destroy(struct xfrm_state *x)
 }
 EXPORT_SYMBOL_GPL(ipcomp_destroy);
 
-int ipcomp_init_state(struct xfrm_state *x, struct netlink_ext_ack *extack)
+int ipcomp_init_state(struct xfrm_state *x)
 {
 	int err;
 	struct ipcomp_data *ipcd;
 	struct xfrm_algo_desc *calg_desc;
 
 	err = -EINVAL;
-	if (!x->calg) {
-		NL_SET_ERR_MSG(extack, "Missing required compression algorithm");
+	if (!x->calg)
 		goto out;
-	}
 
-	if (x->encap) {
-		NL_SET_ERR_MSG(extack, "IPComp is not compatible with encapsulation");
+	if (x->encap)
 		goto out;
-	}
 
 	err = -ENOMEM;
 	ipcd = kzalloc(sizeof(*ipcd), GFP_KERNEL);

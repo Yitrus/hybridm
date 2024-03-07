@@ -189,7 +189,7 @@ void vgic_v4_configure_vsgis(struct kvm *kvm)
 {
 	struct vgic_dist *dist = &kvm->arch.vgic;
 	struct kvm_vcpu *vcpu;
-	unsigned long i;
+	int i;
 
 	kvm_arm_halt_guest(kvm);
 
@@ -222,11 +222,6 @@ void vgic_v4_get_vlpi_state(struct vgic_irq *irq, bool *val)
 	*val = !!(*ptr & mask);
 }
 
-int vgic_v4_request_vpe_irq(struct kvm_vcpu *vcpu, int irq)
-{
-	return request_irq(irq, vgic_v4_doorbell_handler, 0, "vcpu", vcpu);
-}
-
 /**
  * vgic_v4_init - Initialize the GICv4 data structures
  * @kvm:	Pointer to the VM being initialized
@@ -240,8 +235,7 @@ int vgic_v4_init(struct kvm *kvm)
 {
 	struct vgic_dist *dist = &kvm->arch.vgic;
 	struct kvm_vcpu *vcpu;
-	int nr_vcpus, ret;
-	unsigned long i;
+	int i, nr_vcpus, ret;
 
 	if (!kvm_vgic_global_state.has_gicv4)
 		return 0; /* Nothing to see here... move along. */
@@ -252,7 +246,7 @@ int vgic_v4_init(struct kvm *kvm)
 	nr_vcpus = atomic_read(&kvm->online_vcpus);
 
 	dist->its_vm.vpes = kcalloc(nr_vcpus, sizeof(*dist->its_vm.vpes),
-				    GFP_KERNEL_ACCOUNT);
+				    GFP_KERNEL);
 	if (!dist->its_vm.vpes)
 		return -ENOMEM;
 
@@ -288,7 +282,8 @@ int vgic_v4_init(struct kvm *kvm)
 			irq_flags &= ~IRQ_NOAUTOEN;
 		irq_set_status_flags(irq, irq_flags);
 
-		ret = vgic_v4_request_vpe_irq(vcpu, irq);
+		ret = request_irq(irq, vgic_v4_doorbell_handler,
+				  0, "vcpu", vcpu);
 		if (ret) {
 			kvm_err("failed to allocate vcpu IRQ%d\n", irq);
 			/*

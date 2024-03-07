@@ -11,7 +11,6 @@
  *  Code is based on s3fb
  */
 
-#include <linux/aperture.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -318,6 +317,14 @@ struct dac_info
 	void *data;
 };
 
+
+static inline u8 dac_read_reg(struct dac_info *info, u8 reg)
+{
+	u8 code[2] = {reg, 0};
+	info->dac_read_regs(info->data, code, 1);
+	return code[1];
+}
+
 static inline void dac_read_regs(struct dac_info *info, u8 *code, int count)
 {
 	info->dac_read_regs(info->data, code, count);
@@ -559,9 +566,6 @@ static int arkfb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 {
 	int rv, mem, step;
 
-	if (!var->pixclock)
-		return -EINVAL;
-
 	/* Find appropriate format */
 	rv = svga_match_format (arkfb_formats, var, NULL);
 	if (rv < 0)
@@ -774,12 +778,7 @@ static int arkfb_set_par(struct fb_info *info)
 		return -EINVAL;
 	}
 
-	value = (hdiv * info->var.pixclock) / hmul;
-	if (!value) {
-		fb_dbg(info, "invalid pixclock\n");
-		value = 1;
-	}
-	ark_set_pixclock(info, value);
+	ark_set_pixclock(info, (hdiv * info->var.pixclock) / hmul);
 	svga_set_timings(par->state.vgabase, &ark_timing_regs, &(info->var), hmul, hdiv,
 			 (info->var.vmode & FB_VMODE_DOUBLE)     ? 2 : 1,
 			 (info->var.vmode & FB_VMODE_INTERLACED) ? 2 : 1,
@@ -790,8 +789,6 @@ static int arkfb_set_par(struct fb_info *info)
 	value = ((value * hmul / hdiv) / 8) - 5;
 	vga_wcrt(par->state.vgabase, 0x42, (value + 1) / 2);
 
-	if (screen_size > info->screen_size)
-		screen_size = info->screen_size;
 	memset_io(info->screen_base, 0x00, screen_size);
 	/* Device and screen back on */
 	svga_wcrt_mask(par->state.vgabase, 0x17, 0x80, 0x80);
@@ -948,10 +945,6 @@ static int ark_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	struct arkfb_info *par;
 	int rc;
 	u8 regval;
-
-	rc = aperture_remove_conflicting_pci_devices(dev, "arkfb");
-	if (rc < 0)
-		return rc;
 
 	/* Ignore secondary VGA device because there is no VGA arbitration */
 	if (! svga_primary_device(dev)) {
@@ -1187,12 +1180,7 @@ static int __init arkfb_init(void)
 
 #ifndef MODULE
 	char *option = NULL;
-#endif
 
-	if (fb_modesetting_disabled("arkfb"))
-		return -ENODEV;
-
-#ifndef MODULE
 	if (fb_get_options("arkfb", &option))
 		return -ENODEV;
 

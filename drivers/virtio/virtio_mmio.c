@@ -62,7 +62,6 @@
 #include <linux/list.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
-#include <linux/pm.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/virtio.h>
@@ -145,8 +144,8 @@ static int vm_finalize_features(struct virtio_device *vdev)
 	return 0;
 }
 
-static void vm_get(struct virtio_device *vdev, unsigned int offset,
-		   void *buf, unsigned int len)
+static void vm_get(struct virtio_device *vdev, unsigned offset,
+		   void *buf, unsigned len)
 {
 	struct virtio_mmio_device *vm_dev = to_virtio_mmio_device(vdev);
 	void __iomem *base = vm_dev->base + VIRTIO_MMIO_CONFIG;
@@ -187,8 +186,8 @@ static void vm_get(struct virtio_device *vdev, unsigned int offset,
 	}
 }
 
-static void vm_set(struct virtio_device *vdev, unsigned int offset,
-		   const void *buf, unsigned int len)
+static void vm_set(struct virtio_device *vdev, unsigned offset,
+		   const void *buf, unsigned len)
 {
 	struct virtio_mmio_device *vm_dev = to_virtio_mmio_device(vdev);
 	void __iomem *base = vm_dev->base + VIRTIO_MMIO_CONFIG;
@@ -254,11 +253,6 @@ static void vm_set_status(struct virtio_device *vdev, u8 status)
 	/* We should never be setting status to 0. */
 	BUG_ON(status == 0);
 
-	/*
-	 * Per memory-barriers.txt, wmb() is not needed to guarantee
-	 * that the cache coherent memory writes have completed
-	 * before writing to the MMIO region.
-	 */
 	writel(status, vm_dev->base + VIRTIO_MMIO_STATUS);
 }
 
@@ -351,14 +345,7 @@ static void vm_del_vqs(struct virtio_device *vdev)
 	free_irq(platform_get_irq(vm_dev->pdev, 0), vm_dev);
 }
 
-static void vm_synchronize_cbs(struct virtio_device *vdev)
-{
-	struct virtio_mmio_device *vm_dev = to_virtio_mmio_device(vdev);
-
-	synchronize_irq(platform_get_irq(vm_dev->pdev, 0));
-}
-
-static struct virtqueue *vm_setup_vq(struct virtio_device *vdev, unsigned int index,
+static struct virtqueue *vm_setup_vq(struct virtio_device *vdev, unsigned index,
 				  void (*callback)(struct virtqueue *vq),
 				  const char *name, bool ctx)
 {
@@ -402,8 +389,6 @@ static struct virtqueue *vm_setup_vq(struct virtio_device *vdev, unsigned int in
 		err = -ENOMEM;
 		goto error_new_virtqueue;
 	}
-
-	vq->num_max = num;
 
 	/* Activate the queue */
 	writel(virtqueue_get_vring_size(vq), vm_dev->base + VIRTIO_MMIO_QUEUE_NUM);
@@ -470,7 +455,7 @@ error_available:
 	return ERR_PTR(err);
 }
 
-static int vm_find_vqs(struct virtio_device *vdev, unsigned int nvqs,
+static int vm_find_vqs(struct virtio_device *vdev, unsigned nvqs,
 		       struct virtqueue *vqs[],
 		       vq_callback_t *callbacks[],
 		       const char * const names[],
@@ -488,9 +473,6 @@ static int vm_find_vqs(struct virtio_device *vdev, unsigned int nvqs,
 			dev_name(&vdev->dev), vm_dev);
 	if (err)
 		return err;
-
-	if (of_property_read_bool(vm_dev->pdev->dev.of_node, "wakeup-source"))
-		enable_irq_wake(irq);
 
 	for (i = 0; i < nvqs; ++i) {
 		if (!names[i]) {
@@ -559,31 +541,8 @@ static const struct virtio_config_ops virtio_mmio_config_ops = {
 	.finalize_features = vm_finalize_features,
 	.bus_name	= vm_bus_name,
 	.get_shm_region = vm_get_shm_region,
-	.synchronize_cbs = vm_synchronize_cbs,
 };
 
-#ifdef CONFIG_PM_SLEEP
-static int virtio_mmio_freeze(struct device *dev)
-{
-	struct virtio_mmio_device *vm_dev = dev_get_drvdata(dev);
-
-	return virtio_device_freeze(&vm_dev->vdev);
-}
-
-static int virtio_mmio_restore(struct device *dev)
-{
-	struct virtio_mmio_device *vm_dev = dev_get_drvdata(dev);
-
-	if (vm_dev->version == 1)
-		writel(PAGE_SIZE, vm_dev->base + VIRTIO_MMIO_GUEST_PAGE_SIZE);
-
-	return virtio_device_restore(&vm_dev->vdev);
-}
-
-static const struct dev_pm_ops virtio_mmio_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(virtio_mmio_freeze, virtio_mmio_restore)
-};
-#endif
 
 static void virtio_mmio_release_dev(struct device *_d)
 {
@@ -698,7 +657,7 @@ static int vm_cmdline_set(const char *device,
 	int err;
 	struct resource resources[2] = {};
 	char *str;
-	long long base, size;
+	long long int base, size;
 	unsigned int irq;
 	int processed, consumed = 0;
 	struct platform_device *pdev;
@@ -729,7 +688,6 @@ static int vm_cmdline_set(const char *device,
 	if (!vm_cmdline_parent_registered) {
 		err = device_register(&vm_cmdline_parent);
 		if (err) {
-			put_device(&vm_cmdline_parent);
 			pr_err("Failed to register parent device!\n");
 			return err;
 		}
@@ -827,9 +785,6 @@ static struct platform_driver virtio_mmio_driver = {
 		.name	= "virtio-mmio",
 		.of_match_table	= virtio_mmio_match,
 		.acpi_match_table = ACPI_PTR(virtio_mmio_acpi_match),
-#ifdef CONFIG_PM_SLEEP
-		.pm	= &virtio_mmio_pm_ops,
-#endif
 	},
 };
 

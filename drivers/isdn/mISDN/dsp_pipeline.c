@@ -77,7 +77,6 @@ int mISDN_dsp_element_register(struct mISDN_dsp_element *elem)
 	if (!entry)
 		return -ENOMEM;
 
-	INIT_LIST_HEAD(&entry->list);
 	entry->elem = elem;
 
 	entry->dev.class = elements_class;
@@ -108,7 +107,7 @@ err2:
 	device_unregister(&entry->dev);
 	return ret;
 err1:
-	put_device(&entry->dev);
+	kfree(entry);
 	return ret;
 }
 EXPORT_SYMBOL(mISDN_dsp_element_register);
@@ -193,7 +192,7 @@ void dsp_pipeline_destroy(struct dsp_pipeline *pipeline)
 int dsp_pipeline_build(struct dsp_pipeline *pipeline, const char *cfg)
 {
 	int found = 0;
-	char *dup, *next, *tok, *name, *args;
+	char *dup, *tok, *name, *args;
 	struct dsp_element_entry *entry, *n;
 	struct dsp_pipeline_entry *pipeline_entry;
 	struct mISDN_dsp_element *elem;
@@ -204,10 +203,10 @@ int dsp_pipeline_build(struct dsp_pipeline *pipeline, const char *cfg)
 	if (!list_empty(&pipeline->list))
 		_dsp_pipeline_destroy(pipeline);
 
-	dup = next = kstrdup(cfg, GFP_ATOMIC);
+	dup = kstrdup(cfg, GFP_ATOMIC);
 	if (!dup)
 		return 0;
-	while ((tok = strsep(&next, "|"))) {
+	while ((tok = strsep(&dup, "|"))) {
 		if (!strlen(tok))
 			continue;
 		name = strsep(&tok, "(");

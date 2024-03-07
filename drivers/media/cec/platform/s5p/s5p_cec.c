@@ -115,8 +115,6 @@ static irqreturn_t s5p_cec_irq_handler(int irq, void *priv)
 				dev_dbg(cec->dev, "Buffer overrun (worker did not process previous message)\n");
 			cec->rx = STATE_BUSY;
 			cec->msg.len = status >> 24;
-			if (cec->msg.len > CEC_MAX_MSG_SIZE)
-				cec->msg.len = CEC_MAX_MSG_SIZE;
 			cec->msg.rx_status = CEC_RX_STATUS_OK;
 			s5p_cec_get_rx_buf(cec, cec->msg.len,
 					cec->msg.msg);
@@ -180,6 +178,7 @@ static int s5p_cec_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct device *hdmi_dev;
+	struct resource *res;
 	struct s5p_cec_dev *cec;
 	bool needs_hpd = of_property_read_bool(pdev->dev.of_node, "needs-hpd");
 	int ret;
@@ -213,7 +212,8 @@ static int s5p_cec_probe(struct platform_device *pdev)
 	if (IS_ERR(cec->pmu))
 		return -EPROBE_DEFER;
 
-	cec->reg = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	cec->reg = devm_ioremap_resource(dev, res);
 	if (IS_ERR(cec->reg))
 		return PTR_ERR(cec->reg);
 

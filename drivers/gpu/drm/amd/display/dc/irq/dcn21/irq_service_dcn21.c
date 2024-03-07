@@ -40,9 +40,10 @@
 
 #include "ivsrcid/dcn/irqsrcs_dcn_1_0.h"
 
-static enum dc_irq_source to_dal_irq_source_dcn21(struct irq_service *irq_service,
-						  uint32_t src_id,
-						  uint32_t ext_id)
+enum dc_irq_source to_dal_irq_source_dcn21(
+		struct irq_service *irq_service,
+		uint32_t src_id,
+		uint32_t ext_id)
 {
 	switch (src_id) {
 	case DCN_1_0__SRCID__DC_D1_OTG_VSTARTUP:
@@ -265,6 +266,14 @@ static const struct irq_source_info_funcs vline0_irq_info_funcs = {
 		.funcs = &pflip_irq_info_funcs\
 	}
 
+#define vupdate_int_entry(reg_num)\
+	[DC_IRQ_SOURCE_VUPDATE1 + reg_num] = {\
+		IRQ_REG_ENTRY(OTG, reg_num,\
+			OTG_GLOBAL_SYNC_STATUS, VUPDATE_INT_EN,\
+			OTG_GLOBAL_SYNC_STATUS, VUPDATE_EVENT_CLEAR),\
+		.funcs = &vblank_irq_info_funcs\
+	}
+
 /* vupdate_no_lock_int_entry maps to DC_IRQ_SOURCE_VUPDATEx, to match semantic
  * of DCE's DC_IRQ_SOURCE_VUPDATEx.
  */
@@ -393,6 +402,12 @@ irq_source_info_dcn21[DAL_IRQ_SOURCES_NUMBER] = {
 	dc_underflow_int_entry(6),
 	[DC_IRQ_SOURCE_DMCU_SCP] = dummy_irq_entry(),
 	[DC_IRQ_SOURCE_VBIOS_SW] = dummy_irq_entry(),
+	vupdate_int_entry(0),
+	vupdate_int_entry(1),
+	vupdate_int_entry(2),
+	vupdate_int_entry(3),
+	vupdate_int_entry(4),
+	vupdate_int_entry(5),
 	vupdate_no_lock_int_entry(0),
 	vupdate_no_lock_int_entry(1),
 	vupdate_no_lock_int_entry(2),

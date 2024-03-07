@@ -227,8 +227,8 @@ static void rose_remove_neigh(struct rose_neigh *rose_neigh)
 {
 	struct rose_neigh *s;
 
-	del_timer_sync(&rose_neigh->ftimer);
-	del_timer_sync(&rose_neigh->t0timer);
+	rose_stop_ftimer(rose_neigh);
+	rose_stop_t0timer(rose_neigh);
 
 	skb_queue_purge(&rose_neigh->queue);
 
@@ -401,7 +401,7 @@ void rose_add_loopback_neigh(void)
 /*
  *	Add a loopback node.
  */
-int rose_add_loopback_node(const rose_address *address)
+int rose_add_loopback_node(rose_address *address)
 {
 	struct rose_node *rose_node;
 	int err = 0;
@@ -446,7 +446,7 @@ out:
 /*
  *	Delete a loopback node.
  */
-void rose_del_loopback_node(const rose_address *address)
+void rose_del_loopback_node(rose_address *address)
 {
 	struct rose_node *rose_node;
 
@@ -615,8 +615,6 @@ struct net_device *rose_dev_first(void)
 			if (first == NULL || strncmp(dev->name, first->name, 3) < 0)
 				first = dev;
 	}
-	if (first)
-		dev_hold(first);
 	rcu_read_unlock();
 
 	return first;
@@ -631,8 +629,7 @@ struct net_device *rose_dev_get(rose_address *addr)
 
 	rcu_read_lock();
 	for_each_netdev_rcu(&init_net, dev) {
-		if ((dev->flags & IFF_UP) && dev->type == ARPHRD_ROSE &&
-		    rosecmp(addr, (const rose_address *)dev->dev_addr) == 0) {
+		if ((dev->flags & IFF_UP) && dev->type == ARPHRD_ROSE && rosecmp(addr, (rose_address *)dev->dev_addr) == 0) {
 			dev_hold(dev);
 			goto out;
 		}
@@ -649,8 +646,7 @@ static int rose_dev_exists(rose_address *addr)
 
 	rcu_read_lock();
 	for_each_netdev_rcu(&init_net, dev) {
-		if ((dev->flags & IFF_UP) && dev->type == ARPHRD_ROSE &&
-		    rosecmp(addr, (const rose_address *)dev->dev_addr) == 0)
+		if ((dev->flags & IFF_UP) && dev->type == ARPHRD_ROSE && rosecmp(addr, (rose_address *)dev->dev_addr) == 0)
 			goto out;
 	}
 	dev = NULL;
@@ -1130,15 +1126,22 @@ static int rose_node_show(struct seq_file *seq, void *v)
 		seq_puts(seq, "address    mask n neigh neigh neigh\n");
 	else {
 		const struct rose_node *rose_node = v;
-		seq_printf(seq, "%-10s %04d %d",
-			   rose2asc(rsbuf, &rose_node->address),
-			   rose_node->mask,
-			   rose_node->count);
+		/* if (rose_node->loopback) {
+			seq_printf(seq, "%-10s %04d 1 loopback\n",
+				   rose2asc(rsbuf, &rose_node->address),
+				   rose_node->mask);
+		} else { */
+			seq_printf(seq, "%-10s %04d %d",
+				   rose2asc(rsbuf, &rose_node->address),
+				   rose_node->mask,
+				   rose_node->count);
 
-		for (i = 0; i < rose_node->count; i++)
-			seq_printf(seq, " %05d", rose_node->neighbour[i]->number);
+			for (i = 0; i < rose_node->count; i++)
+				seq_printf(seq, " %05d",
+					rose_node->neighbour[i]->number);
 
-		seq_puts(seq, "\n");
+			seq_puts(seq, "\n");
+		/* } */
 	}
 	return 0;
 }

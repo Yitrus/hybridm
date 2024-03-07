@@ -54,7 +54,6 @@
  */
 
 #include <linux/linkage.h>
-#include <linux/cfi_types.h>
 
 #define DIGEST_PTR	%rdi	/* 1st arg */
 #define DATA_PTR	%rsi	/* 2nd arg */
@@ -93,7 +92,8 @@
  * numBlocks: Number of blocks to process
  */
 .text
-SYM_TYPED_FUNC_START(sha1_ni_transform)
+.align 32
+SYM_FUNC_START(sha1_ni_transform)
 	push		%rbp
 	mov		%rsp, %rbp
 	sub		$FRAME_SIZE, %rsp
@@ -290,7 +290,7 @@ SYM_TYPED_FUNC_START(sha1_ni_transform)
 	mov		%rbp, %rsp
 	pop		%rbp
 
-	RET
+	ret
 SYM_FUNC_END(sha1_ni_transform)
 
 .section	.rodata.cst16.PSHUFFLE_BYTE_FLIP_MASK, "aM", @progbits, 16

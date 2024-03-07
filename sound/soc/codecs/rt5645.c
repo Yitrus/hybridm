@@ -2969,7 +2969,7 @@ static int rt5645_set_dai_pll(struct snd_soc_dai *dai, int pll_id, int source,
 
 	ret = rl6231_pll_calc(freq_in, freq_out, &pll_code);
 	if (ret < 0) {
-		dev_err(component->dev, "Unsupported input clock %d\n", freq_in);
+		dev_err(component->dev, "Unsupport input clock %d\n", freq_in);
 		return ret;
 	}
 
@@ -3534,6 +3534,7 @@ static const struct snd_soc_component_driver soc_component_dev_rt5645 = {
 	.num_dapm_routes	= ARRAY_SIZE(rt5645_dapm_routes),
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
+	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config rt5645_regmap = {
@@ -3854,7 +3855,8 @@ static int rt5645_parse_dt(struct rt5645_priv *rt5645, struct device *dev)
 	return 0;
 }
 
-static int rt5645_i2c_probe(struct i2c_client *i2c)
+static int rt5645_i2c_probe(struct i2c_client *i2c,
+		    const struct i2c_device_id *id)
 {
 	struct rt5645_platform_data *pdata = NULL;
 	const struct dmi_system_id *dmi_data;
@@ -3942,7 +3944,7 @@ static int rt5645_i2c_probe(struct i2c_client *i2c)
 		ret = PTR_ERR(regmap);
 		dev_err(&i2c->dev, "Failed to allocate temp register map: %d\n",
 			ret);
-		goto err_enable;
+		return ret;
 	}
 
 	/*
@@ -3973,7 +3975,7 @@ static int rt5645_i2c_probe(struct i2c_client *i2c)
 		ret = PTR_ERR(rt5645->regmap);
 		dev_err(&i2c->dev, "Failed to allocate register map: %d\n",
 			ret);
-		goto err_enable;
+		return ret;
 	}
 
 	regmap_write(rt5645->regmap, RT5645_RESET, 0);
@@ -4145,23 +4147,20 @@ err_enable:
 	return ret;
 }
 
-static void rt5645_i2c_remove(struct i2c_client *i2c)
+static int rt5645_i2c_remove(struct i2c_client *i2c)
 {
 	struct rt5645_priv *rt5645 = i2c_get_clientdata(i2c);
 
 	if (i2c->irq)
 		free_irq(i2c->irq, rt5645);
 
-	/*
-	 * Since the rt5645_btn_check_callback() can queue jack_detect_work,
-	 * the timer need to be delted first
-	 */
-	del_timer_sync(&rt5645->btn_check_timer);
-
 	cancel_delayed_work_sync(&rt5645->jack_detect_work);
 	cancel_delayed_work_sync(&rt5645->rcclock_work);
+	del_timer_sync(&rt5645->btn_check_timer);
 
 	regulator_bulk_disable(ARRAY_SIZE(rt5645->supplies), rt5645->supplies);
+
+	return 0;
 }
 
 static void rt5645_i2c_shutdown(struct i2c_client *i2c)
@@ -4184,7 +4183,7 @@ static struct i2c_driver rt5645_i2c_driver = {
 		.of_match_table = of_match_ptr(rt5645_of_match),
 		.acpi_match_table = ACPI_PTR(rt5645_acpi_match),
 	},
-	.probe_new = rt5645_i2c_probe,
+	.probe = rt5645_i2c_probe,
 	.remove = rt5645_i2c_remove,
 	.shutdown = rt5645_i2c_shutdown,
 	.id_table = rt5645_i2c_id,

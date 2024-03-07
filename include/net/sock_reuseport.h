@@ -16,7 +16,6 @@ struct sock_reuseport {
 	u16			max_socks;		/* length of socks */
 	u16			num_socks;		/* elements in socks */
 	u16			num_closed_socks;	/* closed elements in socks */
-	u16			incoming_cpu;
 	/* The last synq overflow event timestamp of this
 	 * reuse->socks[] group.
 	 */
@@ -44,21 +43,21 @@ struct sock *reuseport_migrate_sock(struct sock *sk,
 extern int reuseport_attach_prog(struct sock *sk, struct bpf_prog *prog);
 extern int reuseport_detach_prog(struct sock *sk);
 
-static inline bool reuseport_has_conns(struct sock *sk)
+static inline bool reuseport_has_conns(struct sock *sk, bool set)
 {
 	struct sock_reuseport *reuse;
 	bool ret = false;
 
 	rcu_read_lock();
 	reuse = rcu_dereference(sk->sk_reuseport_cb);
-	if (reuse && reuse->has_conns)
-		ret = true;
+	if (reuse) {
+		if (set)
+			reuse->has_conns = 1;
+		ret = reuse->has_conns;
+	}
 	rcu_read_unlock();
 
 	return ret;
 }
-
-void reuseport_has_conns_set(struct sock *sk);
-void reuseport_update_incoming_cpu(struct sock *sk, int val);
 
 #endif  /* _SOCK_REUSEPORT_H */

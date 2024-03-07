@@ -25,7 +25,6 @@
 #include <linux/ip.h>
 #include <linux/crash_dump.h>
 #include <net/tcp.h>
-#include <net/gro.h>
 #include <net/ipv6.h>
 #include <net/ip6_checksum.h>
 #include <linux/prefetch.h>
@@ -44,7 +43,8 @@ static void bnx2x_add_all_napi_cnic(struct bnx2x *bp)
 
 	/* Add NAPI objects */
 	for_each_rx_queue_cnic(bp, i) {
-		netif_napi_add(bp->dev, &bnx2x_fp(bp, i, napi), bnx2x_poll);
+		netif_napi_add(bp->dev, &bnx2x_fp(bp, i, napi),
+			       bnx2x_poll, NAPI_POLL_WEIGHT);
 	}
 }
 
@@ -54,7 +54,8 @@ static void bnx2x_add_all_napi(struct bnx2x *bp)
 
 	/* Add NAPI objects */
 	for_each_eth_queue(bp, i) {
-		netif_napi_add(bp->dev, &bnx2x_fp(bp, i, napi), bnx2x_poll);
+		netif_napi_add(bp->dev, &bnx2x_fp(bp, i, napi),
+			       bnx2x_poll, NAPI_POLL_WEIGHT);
 	}
 }
 
@@ -148,7 +149,7 @@ void bnx2x_fill_fw_str(struct bnx2x *bp, char *buf, size_t buf_len)
 		phy_fw_ver[0] = '\0';
 		bnx2x_get_ext_phy_fw_version(&bp->link_params,
 					     phy_fw_ver, PHY_FW_VER_LEN);
-		strscpy(buf, bp->fw_ver, buf_len);
+		strlcpy(buf, bp->fw_ver, buf_len);
 		snprintf(buf + strlen(bp->fw_ver), 32 - strlen(bp->fw_ver),
 			 "bc %d.%d.%d%s%s",
 			 (bp->common.bc_ver & 0xff0000) >> 16,
@@ -787,7 +788,6 @@ static void bnx2x_tpa_stop(struct bnx2x *bp, struct bnx2x_fastpath *fp,
 			BNX2X_ERR("skb_put is about to fail...  pad %d  len %d  rx_buf_size %d\n",
 				  pad, len, fp->rx_buf_size);
 			bnx2x_panic();
-			bnx2x_frag_free(fp, new_data);
 			return;
 		}
 #endif
@@ -2363,30 +2363,24 @@ int bnx2x_compare_fw_ver(struct bnx2x *bp, u32 load_code, bool print_err)
 	/* is another pf loaded on this engine? */
 	if (load_code != FW_MSG_CODE_DRV_LOAD_COMMON_CHIP &&
 	    load_code != FW_MSG_CODE_DRV_LOAD_COMMON) {
-		u8 loaded_fw_major, loaded_fw_minor, loaded_fw_rev, loaded_fw_eng;
-		u32 loaded_fw;
+		/* build my FW version dword */
+		u32 my_fw = (bp->fw_major) + (bp->fw_minor << 8) +
+				(bp->fw_rev << 16) + (bp->fw_eng << 24);
 
 		/* read loaded FW from chip */
-		loaded_fw = REG_RD(bp, XSEM_REG_PRAM);
+		u32 loaded_fw = REG_RD(bp, XSEM_REG_PRAM);
 
-		loaded_fw_major = loaded_fw & 0xff;
-		loaded_fw_minor = (loaded_fw >> 8) & 0xff;
-		loaded_fw_rev = (loaded_fw >> 16) & 0xff;
-		loaded_fw_eng = (loaded_fw >> 24) & 0xff;
-
-		DP(BNX2X_MSG_SP, "loaded fw 0x%x major 0x%x minor 0x%x rev 0x%x eng 0x%x\n",
-		   loaded_fw, loaded_fw_major, loaded_fw_minor, loaded_fw_rev, loaded_fw_eng);
+		DP(BNX2X_MSG_SP, "loaded fw %x, my fw %x\n",
+		   loaded_fw, my_fw);
 
 		/* abort nic load if version mismatch */
-		if (loaded_fw_major != BCM_5710_FW_MAJOR_VERSION ||
-		    loaded_fw_minor != BCM_5710_FW_MINOR_VERSION ||
-		    loaded_fw_eng != BCM_5710_FW_ENGINEERING_VERSION ||
-		    loaded_fw_rev < BCM_5710_FW_REVISION_VERSION_V15) {
+		if (my_fw != loaded_fw) {
 			if (print_err)
-				BNX2X_ERR("loaded FW incompatible. Aborting\n");
+				BNX2X_ERR("bnx2x with FW %x was already loaded which mismatches my %x FW. Aborting\n",
+					  loaded_fw, my_fw);
 			else
-				BNX2X_DEV_INFO("loaded FW incompatible, possibly due to MF UNDI\n");
-
+				BNX2X_DEV_INFO("bnx2x with FW %x was already loaded which mismatches my %x FW, possibly due to MF UNDI\n",
+					       loaded_fw, my_fw);
 			return -EBUSY;
 		}
 	}
@@ -3420,9 +3414,12 @@ static int bnx2x_pkt_req_lin(struct bnx2x *bp, struct sk_buff *skb,
 
 			/* Headers length */
 			if (xmit_type & XMIT_GSO_ENC)
-				hlen = skb_inner_tcp_all_headers(skb);
+				hlen = (int)(skb_inner_transport_header(skb) -
+					     skb->data) +
+					     inner_tcp_hdrlen(skb);
 			else
-				hlen = skb_tcp_all_headers(skb);
+				hlen = (int)(skb_transport_header(skb) -
+					     skb->data) + tcp_hdrlen(skb);
 
 			/* Amount of data (w/o headers) on linear part of SKB*/
 			first_bd_sz = skb_headlen(skb) - hlen;
@@ -3530,13 +3527,15 @@ static u8 bnx2x_set_pbd_csum_enc(struct bnx2x *bp, struct sk_buff *skb,
 			ETH_TX_PARSE_BD_E2_TCP_HDR_LENGTH_DW_SHIFT) &
 			ETH_TX_PARSE_BD_E2_TCP_HDR_LENGTH_DW;
 
-		return skb_inner_tcp_all_headers(skb);
+		return skb_inner_transport_header(skb) +
+			inner_tcp_hdrlen(skb) - skb->data;
 	}
 
 	/* We support checksum offload for TCP and UDP only.
 	 * No need to pass the UDP header length - it's a constant.
 	 */
-	return skb_inner_transport_offset(skb) + sizeof(struct udphdr);
+	return skb_inner_transport_header(skb) +
+		sizeof(struct udphdr) - skb->data;
 }
 
 /**
@@ -3562,12 +3561,12 @@ static u8 bnx2x_set_pbd_csum_e2(struct bnx2x *bp, struct sk_buff *skb,
 			ETH_TX_PARSE_BD_E2_TCP_HDR_LENGTH_DW_SHIFT) &
 			ETH_TX_PARSE_BD_E2_TCP_HDR_LENGTH_DW;
 
-		return skb_tcp_all_headers(skb);
+		return skb_transport_header(skb) + tcp_hdrlen(skb) - skb->data;
 	}
 	/* We support checksum offload for TCP and UDP only.
 	 * No need to pass the UDP header length - it's a constant.
 	 */
-	return skb_transport_offset(skb) + sizeof(struct udphdr);
+	return skb_transport_header(skb) + sizeof(struct udphdr) - skb->data;
 }
 
 /* set FW indication according to inner or outer protocols if tunneled */
@@ -4335,7 +4334,7 @@ int bnx2x_change_mac_addr(struct net_device *dev, void *p)
 			return rc;
 	}
 
-	eth_hw_addr_set(dev, addr->sa_data);
+	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
 
 	if (netif_running(dev))
 		rc = bnx2x_set_eth_mac(bp, true);

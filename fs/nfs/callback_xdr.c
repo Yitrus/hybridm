@@ -67,9 +67,9 @@ static __be32 nfs4_callback_null(struct svc_rqst *rqstp)
  * svc_process_common() looks for an XDR encoder to know when
  * not to drop a Reply.
  */
-static bool nfs4_encode_void(struct svc_rqst *rqstp, struct xdr_stream *xdr)
+static int nfs4_encode_void(struct svc_rqst *rqstp, __be32 *p)
 {
-	return true;
+	return xdr_ressize_check(rqstp, p);
 }
 
 static __be32 decode_string(struct xdr_stream *xdr, unsigned int *len,
@@ -258,9 +258,11 @@ __be32 decode_devicenotify_args(struct svc_rqst *rqstp,
 				void *argp)
 {
 	struct cb_devicenotifyargs *args = argp;
-	uint32_t tmp, n, i;
 	__be32 *p;
 	__be32 status = 0;
+	u32 tmp;
+	int n, i;
+	args->ndevs = 0;
 
 	/* Num of device notifications */
 	p = xdr_inline_decode(xdr, sizeof(uint32_t));
@@ -269,8 +271,12 @@ __be32 decode_devicenotify_args(struct svc_rqst *rqstp,
 		goto out;
 	}
 	n = ntohl(*p++);
-	if (n == 0)
+	if (n <= 0)
 		goto out;
+	if (n > ULONG_MAX / sizeof(*args->devs)) {
+		status = htonl(NFS4ERR_BADXDR);
+		goto out;
+	}
 
 	args->devs = kmalloc_array(n, sizeof(*args->devs), GFP_KERNEL);
 	if (!args->devs) {
@@ -324,21 +330,19 @@ __be32 decode_devicenotify_args(struct svc_rqst *rqstp,
 			dev->cbd_immediate = 0;
 		}
 
+		args->ndevs++;
+
 		dprintk("%s: type %d layout 0x%x immediate %d\n",
 			__func__, dev->cbd_notify_type, dev->cbd_layout_type,
 			dev->cbd_immediate);
 	}
-	args->ndevs = n;
-	dprintk("%s: ndevs %d\n", __func__, args->ndevs);
-	return 0;
-err:
-	kfree(args->devs);
 out:
-	args->devs = NULL;
-	args->ndevs = 0;
 	dprintk("%s: status %d ndevs %d\n",
 		__func__, ntohl(status), args->ndevs);
 	return status;
+err:
+	kfree(args->devs);
+	goto out;
 }
 
 static __be32 decode_sessionid(struct xdr_stream *xdr,
@@ -1065,7 +1069,6 @@ static const struct svc_procedure nfs4_callback_procedures1[] = {
 		.pc_func = nfs4_callback_compound,
 		.pc_encode = nfs4_encode_void,
 		.pc_argsize = 256,
-		.pc_argzero = 256,
 		.pc_ressize = 256,
 		.pc_xdrressize = NFS4_CALLBACK_BUFSIZE,
 		.pc_name = "COMPOUND",

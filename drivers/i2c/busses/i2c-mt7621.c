@@ -270,15 +270,18 @@ static void mtk_i2c_init(struct mtk_i2c *i2c)
 
 static int mtk_i2c_probe(struct platform_device *pdev)
 {
+	struct resource *res;
 	struct mtk_i2c *i2c;
 	struct i2c_adapter *adap;
 	int ret;
+
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
 	i2c = devm_kzalloc(&pdev->dev, sizeof(struct mtk_i2c), GFP_KERNEL);
 	if (!i2c)
 		return -ENOMEM;
 
-	i2c->base = devm_platform_get_and_ioremap_resource(pdev, 0, NULL);
+	i2c->base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(i2c->base))
 		return PTR_ERR(i2c->base);
 
@@ -301,8 +304,7 @@ static int mtk_i2c_probe(struct platform_device *pdev)
 
 	if (i2c->bus_freq == 0) {
 		dev_warn(i2c->dev, "clock-frequency 0 not supported\n");
-		ret = -EINVAL;
-		goto err_disable_clk;
+		return -EINVAL;
 	}
 
 	adap = &i2c->adap;
@@ -312,7 +314,7 @@ static int mtk_i2c_probe(struct platform_device *pdev)
 	adap->dev.parent = &pdev->dev;
 	i2c_set_adapdata(adap, i2c);
 	adap->dev.of_node = pdev->dev.of_node;
-	strscpy(adap->name, dev_name(&pdev->dev), sizeof(adap->name));
+	strlcpy(adap->name, dev_name(&pdev->dev), sizeof(adap->name));
 
 	platform_set_drvdata(pdev, i2c);
 
@@ -320,14 +322,9 @@ static int mtk_i2c_probe(struct platform_device *pdev)
 
 	ret = i2c_add_adapter(adap);
 	if (ret < 0)
-		goto err_disable_clk;
+		return ret;
 
 	dev_info(&pdev->dev, "clock %u kHz\n", i2c->bus_freq / 1000);
-
-	return 0;
-
-err_disable_clk:
-	clk_disable_unprepare(i2c->clk);
 
 	return ret;
 }

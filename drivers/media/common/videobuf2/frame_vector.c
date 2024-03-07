@@ -14,7 +14,6 @@
  * get_vaddr_frames() - map virtual addresses to pfns
  * @start:	starting user address
  * @nr_frames:	number of pages / pfns from start to map
- * @write:	the mapped address has write permission
  * @vec:	structure which receives pages / pfns of the addresses mapped.
  *		It should have space for at least nr_frames entries.
  *
@@ -33,11 +32,13 @@
  *
  * This function takes care of grabbing mmap_lock as necessary.
  */
-int get_vaddr_frames(unsigned long start, unsigned int nr_frames, bool write,
+int get_vaddr_frames(unsigned long start, unsigned int nr_frames,
 		     struct frame_vector *vec)
 {
-	int ret;
-	unsigned int gup_flags = FOLL_LONGTERM;
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma;
+	int ret = 0;
+	int err;
 
 	if (nr_frames == 0)
 		return 0;
@@ -47,22 +48,48 @@ int get_vaddr_frames(unsigned long start, unsigned int nr_frames, bool write,
 
 	start = untagged_addr(start);
 
-	if (write)
-		gup_flags |= FOLL_WRITE;
-
-	ret = pin_user_pages_fast(start, nr_frames, gup_flags,
+	ret = pin_user_pages_fast(start, nr_frames,
+				  FOLL_FORCE | FOLL_WRITE | FOLL_LONGTERM,
 				  (struct page **)(vec->ptrs));
-	vec->got_ref = true;
-	vec->is_pfns = false;
-	vec->nr_frames = ret;
+	if (ret > 0) {
+		vec->got_ref = true;
+		vec->is_pfns = false;
+		goto out_unlocked;
+	}
 
-	if (likely(ret > 0))
-		return ret;
+	mmap_read_lock(mm);
+	vec->got_ref = false;
+	vec->is_pfns = true;
+	ret = 0;
+	do {
+		unsigned long *nums = frame_vector_pfns(vec);
 
-	/* This used to (racily) return non-refcounted pfns. Let people know */
-	WARN_ONCE(1, "get_vaddr_frames() cannot follow VM_IO mapping");
-	vec->nr_frames = 0;
-	return ret ? ret : -EFAULT;
+		vma = vma_lookup(mm, start);
+		if (!vma)
+			break;
+
+		while (ret < nr_frames && start + PAGE_SIZE <= vma->vm_end) {
+			err = follow_pfn(vma, start, &nums[ret]);
+			if (err) {
+				if (ret == 0)
+					ret = err;
+				goto out;
+			}
+			start += PAGE_SIZE;
+			ret++;
+		}
+		/* Bail out if VMA doesn't completely cover the tail page. */
+		if (start < vma->vm_end)
+			break;
+	} while (ret < nr_frames);
+out:
+	mmap_read_unlock(mm);
+out_unlocked:
+	if (!ret)
+		ret = -EFAULT;
+	if (ret > 0)
+		vec->nr_frames = ret;
+	return ret;
 }
 EXPORT_SYMBOL(get_vaddr_frames);
 

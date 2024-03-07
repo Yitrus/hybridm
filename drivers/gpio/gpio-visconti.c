@@ -103,12 +103,15 @@ static int visconti_gpio_child_to_parent_hwirq(struct gpio_chip *gc,
 	return -EINVAL;
 }
 
-static int visconti_gpio_populate_parent_fwspec(struct gpio_chip *chip,
-						union gpio_irq_fwspec *gfwspec,
-						unsigned int parent_hwirq,
-						unsigned int parent_type)
+static void *visconti_gpio_populate_parent_fwspec(struct gpio_chip *chip,
+						  unsigned int parent_hwirq,
+						  unsigned int parent_type)
 {
-	struct irq_fwspec *fwspec = &gfwspec->fwspec;
+	struct irq_fwspec *fwspec;
+
+	fwspec = kmalloc(sizeof(*fwspec), GFP_KERNEL);
+	if (!fwspec)
+		return NULL;
 
 	fwspec->fwnode = chip->irq.parent_domain->fwnode;
 	fwspec->param_count = 3;
@@ -116,7 +119,7 @@ static int visconti_gpio_populate_parent_fwspec(struct gpio_chip *chip,
 	fwspec->param[1] = parent_hwirq;
 	fwspec->param[2] = parent_type;
 
-	return 0;
+	return fwspec;
 }
 
 static int visconti_gpio_probe(struct platform_device *pdev)
@@ -127,6 +130,7 @@ static int visconti_gpio_probe(struct platform_device *pdev)
 	struct gpio_irq_chip *girq;
 	struct irq_domain *parent;
 	struct device_node *irq_parent;
+	struct fwnode_handle *fwnode;
 	int ret;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
@@ -146,11 +150,13 @@ static int visconti_gpio_probe(struct platform_device *pdev)
 	}
 
 	parent = irq_find_host(irq_parent);
-	of_node_put(irq_parent);
 	if (!parent) {
 		dev_err(dev, "No IRQ parent domain\n");
 		return -ENODEV;
 	}
+
+	fwnode = of_node_to_fwnode(irq_parent);
+	of_node_put(irq_parent);
 
 	ret = bgpio_init(&priv->gpio_chip, dev, 4,
 			 priv->base + GPIO_IDATA,
@@ -174,7 +180,7 @@ static int visconti_gpio_probe(struct platform_device *pdev)
 
 	girq = &priv->gpio_chip.irq;
 	girq->chip = irq_chip;
-	girq->fwnode = of_node_to_fwnode(dev->of_node);
+	girq->fwnode = fwnode;
 	girq->parent_domain = parent;
 	girq->child_to_parent_hwirq = visconti_gpio_child_to_parent_hwirq;
 	girq->populate_parent_alloc_arg = visconti_gpio_populate_parent_fwspec;

@@ -186,6 +186,7 @@ static int axp20x_battery_get_prop(struct power_supply *psy,
 				   union power_supply_propval *val)
 {
 	struct axp20x_batt_ps *axp20x_batt = power_supply_get_drvdata(psy);
+	struct iio_channel *chan;
 	int ret = 0, reg, val1;
 
 	switch (psp) {
@@ -265,12 +266,12 @@ static int axp20x_battery_get_prop(struct power_supply *psy,
 		if (ret)
 			return ret;
 
-		if (reg & AXP20X_PWR_STATUS_BAT_CHARGING) {
-			ret = iio_read_channel_processed(axp20x_batt->batt_chrg_i, &val->intval);
-		} else {
-			ret = iio_read_channel_processed(axp20x_batt->batt_dischrg_i, &val1);
-			val->intval = -val1;
-		}
+		if (reg & AXP20X_PWR_STATUS_BAT_CHARGING)
+			chan = axp20x_batt->batt_chrg_i;
+		else
+			chan = axp20x_batt->batt_dischrg_i;
+
+		ret = iio_read_channel_processed(chan, &val->intval);
 		if (ret)
 			return ret;
 
@@ -560,7 +561,7 @@ static int axp20x_power_probe(struct platform_device *pdev)
 {
 	struct axp20x_batt_ps *axp20x_batt;
 	struct power_supply_config psy_cfg = {};
-	struct power_supply_battery_info *info;
+	struct power_supply_battery_info info;
 	struct device *dev = &pdev->dev;
 
 	if (!of_device_is_available(pdev->dev.of_node))
@@ -614,8 +615,8 @@ static int axp20x_power_probe(struct platform_device *pdev)
 	}
 
 	if (!power_supply_get_battery_info(axp20x_batt->batt, &info)) {
-		int vmin = info->voltage_min_design_uv;
-		int ccc = info->constant_charge_current_max_ua;
+		int vmin = info.voltage_min_design_uv;
+		int ccc = info.constant_charge_current_max_ua;
 
 		if (vmin > 0 && axp20x_set_voltage_min_design(axp20x_batt,
 							      vmin))

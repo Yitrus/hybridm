@@ -16,7 +16,6 @@
 #include <crypto/authenc.h>
 #include <linux/err.h>
 #include <linux/module.h>
-#include <net/gro.h>
 #include <net/ip.h>
 #include <net/xfrm.h>
 #include <net/esp.h>
@@ -110,10 +109,8 @@ static struct sk_buff *xfrm4_tunnel_gso_segment(struct xfrm_state *x,
 						struct sk_buff *skb,
 						netdev_features_t features)
 {
-	__be16 type = x->inner_mode.family == AF_INET6 ? htons(ETH_P_IPV6)
-						       : htons(ETH_P_IP);
-
-	return skb_eth_gso_segment(skb, features, type);
+	__skb_push(skb, skb->mac_len);
+	return skb_mac_gso_segment(skb, features);
 }
 
 static struct sk_buff *xfrm4_transport_gso_segment(struct xfrm_state *x,
@@ -161,9 +158,6 @@ static struct sk_buff *xfrm4_beet_gso_segment(struct xfrm_state *x,
 		if (proto == IPPROTO_TCP)
 			skb_shinfo(skb)->gso_type |= SKB_GSO_TCPV4;
 	}
-
-	if (proto == IPPROTO_IPV6)
-		skb_shinfo(skb)->gso_type |= SKB_GSO_IPXIP4;
 
 	__skb_pull(skb, skb_transport_offset(skb));
 	ops = rcu_dereference(inet_offloads[proto]);
@@ -313,9 +307,6 @@ static int esp_xmit(struct xfrm_state *x, struct sk_buff *skb,  netdev_features_
 		else
 			xo->seq.low += skb_shinfo(skb)->gso_segs;
 	}
-
-	if (xo->seq.low < seq)
-		xo->seq.hi++;
 
 	esp.seqno = cpu_to_be64(seq + ((u64)xo->seq.hi << 32));
 

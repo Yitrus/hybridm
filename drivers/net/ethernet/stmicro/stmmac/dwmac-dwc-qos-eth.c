@@ -361,7 +361,6 @@ bypass_clk_reset_gpio:
 	data->fix_mac_speed = tegra_eqos_fix_speed;
 	data->init = tegra_eqos_init;
 	data->bsp_priv = eqos;
-	data->sph_disable = 1;
 
 	err = tegra_eqos_init(pdev, eqos);
 	if (err < 0)
@@ -445,7 +444,9 @@ static int dwc_eth_dwmac_probe(struct platform_device *pdev)
 
 	ret = data->probe(pdev, plat_dat, &stmmac_res);
 	if (ret < 0) {
-		dev_err_probe(&pdev->dev, ret, "failed to probe subdriver\n");
+		if (ret != -EPROBE_DEFER)
+			dev_err(&pdev->dev, "failed to probe subdriver: %d\n",
+				ret);
 
 		goto remove_config;
 	}

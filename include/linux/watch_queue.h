@@ -4,7 +4,7 @@
  * Copyright (C) 2020 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
  *
- * See Documentation/core-api/watch_queue.rst
+ * See Documentation/watch_queue.rst
  */
 
 #ifndef _LINUX_WATCH_QUEUE_H
@@ -28,8 +28,7 @@ struct watch_type_filter {
 struct watch_filter {
 	union {
 		struct rcu_head	rcu;
-		/* Bitmask of accepted types */
-		DECLARE_BITMAP(type_filter, WATCH_TYPE__NR);
+		unsigned long	type_filter[2];	/* Bitmask of accepted types */
 	};
 	u32			nr_filters;	/* Number of filters */
 	struct watch_type_filter filters[];

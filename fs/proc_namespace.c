@@ -80,13 +80,13 @@ static void show_mnt_opts(struct seq_file *m, struct vfsmount *mnt)
 			seq_puts(m, fs_infop->str);
 	}
 
-	if (is_idmapped_mnt(mnt))
+	if (mnt_user_ns(mnt) != &init_user_ns)
 		seq_puts(m, ",idmapped");
 }
 
 static inline void mangle(struct seq_file *m, const char *s)
 {
-	seq_escape(m, s, " \t\n\\#");
+	seq_escape(m, s, " \t\n\\");
 }
 
 static void show_type(struct seq_file *m, struct super_block *sb)

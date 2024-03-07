@@ -283,7 +283,7 @@ static int rtw_net_set_mac_address(struct net_device *pnetdev, void *p)
 	if (!padapter->bup) {
 		/* addr->sa_data[4], addr->sa_data[5]); */
 		memcpy(padapter->eeprompriv.mac_addr, addr->sa_data, ETH_ALEN);
-		/* eth_hw_addr_set(pnetdev, addr->sa_data); */
+		/* memcpy(pnetdev->dev_addr, addr->sa_data, ETH_ALEN); */
 		/* padapter->bset_hwaddr = true; */
 	}
 
@@ -389,7 +389,7 @@ static int rtw_ndev_notifier_call(struct notifier_block *nb, unsigned long state
 	if (dev->netdev_ops->ndo_do_ioctl != rtw_ioctl)
 		return NOTIFY_DONE;
 
-	netdev_dbg(dev, FUNC_NDEV_FMT " state:%lu\n", FUNC_NDEV_ARG(dev),
+	netdev_info(dev, FUNC_NDEV_FMT " state:%lu\n", FUNC_NDEV_ARG(dev),
 		    state);
 
 	return NOTIFY_DONE;
@@ -488,7 +488,7 @@ void rtw_unregister_netdevs(struct dvobj_priv *dvobj)
 
 	padapter = dvobj->padapters;
 
-	if (!padapter)
+	if (padapter == NULL)
 		return;
 
 	pnetdev = padapter->pnetdev;
@@ -594,7 +594,7 @@ struct dvobj_priv *devobj_init(void)
 	struct dvobj_priv *pdvobj = NULL;
 
 	pdvobj = rtw_zmalloc(sizeof(*pdvobj));
-	if (!pdvobj)
+	if (pdvobj == NULL)
 		return NULL;
 
 	mutex_init(&pdvobj->hw_init_mutex);
@@ -664,36 +664,51 @@ void rtw_reset_drv_sw(struct adapter *padapter)
 
 u8 rtw_init_drv_sw(struct adapter *padapter)
 {
+	u8 ret8 = _SUCCESS;
+
 	rtw_init_default_value(padapter);
 
 	rtw_init_hal_com_default_value(padapter);
 
-	if (rtw_init_cmd_priv(&padapter->cmdpriv))
-		return _FAIL;
+	if (rtw_init_cmd_priv(&padapter->cmdpriv)) {
+		ret8 = _FAIL;
+		goto exit;
+	}
 
 	padapter->cmdpriv.padapter = padapter;
 
-	if (rtw_init_evt_priv(&padapter->evtpriv))
-		goto free_cmd_priv;
+	if (rtw_init_evt_priv(&padapter->evtpriv)) {
+		ret8 = _FAIL;
+		goto exit;
+	}
 
-	if (rtw_init_mlme_priv(padapter) == _FAIL)
-		goto free_evt_priv;
+
+	if (rtw_init_mlme_priv(padapter) == _FAIL) {
+		ret8 = _FAIL;
+		goto exit;
+	}
 
 	init_mlme_ext_priv(padapter);
 
-	if (_rtw_init_xmit_priv(&padapter->xmitpriv, padapter) == _FAIL)
-		goto free_mlme_ext;
+	if (_rtw_init_xmit_priv(&padapter->xmitpriv, padapter) == _FAIL) {
+		ret8 = _FAIL;
+		goto exit;
+	}
 
-	if (_rtw_init_recv_priv(&padapter->recvpriv, padapter) == _FAIL)
-		goto free_xmit_priv;
+	if (_rtw_init_recv_priv(&padapter->recvpriv, padapter) == _FAIL) {
+		ret8 = _FAIL;
+		goto exit;
+	}
 	/*  add for CONFIG_IEEE80211W, none 11w also can use */
 	spin_lock_init(&padapter->security_key_mutex);
 
 	/*  We don't need to memset padapter->XXX to zero, because adapter is allocated by vzalloc(). */
 	/* memset((unsigned char *)&padapter->securitypriv, 0, sizeof (struct security_priv)); */
 
-	if (_rtw_init_sta_priv(&padapter->stapriv) == _FAIL)
-		goto free_recv_priv;
+	if (_rtw_init_sta_priv(&padapter->stapriv) == _FAIL) {
+		ret8 = _FAIL;
+		goto exit;
+	}
 
 	padapter->stapriv.padapter = padapter;
 	padapter->setband = GHZ24_50;
@@ -704,26 +719,9 @@ u8 rtw_init_drv_sw(struct adapter *padapter)
 
 	rtw_hal_dm_init(padapter);
 
-	return _SUCCESS;
+exit:
 
-free_recv_priv:
-	_rtw_free_recv_priv(&padapter->recvpriv);
-
-free_xmit_priv:
-	_rtw_free_xmit_priv(&padapter->xmitpriv);
-
-free_mlme_ext:
-	free_mlme_ext_priv(&padapter->mlmeextpriv);
-
-	rtw_free_mlme_priv(&padapter->mlmepriv);
-
-free_evt_priv:
-	rtw_free_evt_priv(&padapter->evtpriv);
-
-free_cmd_priv:
-	rtw_free_cmd_priv(&padapter->cmdpriv);
-
-	return _FAIL;
+	return ret8;
 }
 
 void rtw_cancel_all_timer(struct adapter *padapter)
@@ -791,7 +789,7 @@ static int _rtw_drv_register_netdev(struct adapter *padapter, char *name)
 	if (rtw_init_netdev_name(pnetdev, name))
 		return _FAIL;
 
-	eth_hw_addr_set(pnetdev, padapter->eeprompriv.mac_addr);
+	memcpy(pnetdev->dev_addr, padapter->eeprompriv.mac_addr, ETH_ALEN);
 
 	/* Tell the network stack we exist */
 	if (register_netdev(pnetdev) != 0) {
@@ -924,7 +922,11 @@ netdev_open_error:
 
 int rtw_ips_pwr_up(struct adapter *padapter)
 {
-	return ips_netdrv_open(padapter);
+	int result;
+
+	result = ips_netdrv_open(padapter);
+
+	return result;
 }
 
 void rtw_ips_pwr_down(struct adapter *padapter)

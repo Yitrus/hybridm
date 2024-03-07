@@ -12,7 +12,7 @@
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
-#include <linux/pm_runtime.h>
+
 #include <linux/iio/iio.h>
 #include <linux/iio/consumer.h>
 #include <linux/iio/adc/stm32-dfsdm-adc.h>
@@ -149,7 +149,6 @@ static const struct snd_soc_dai_driver stm32_adfsdm_dai = {
 
 static const struct snd_soc_component_driver stm32_adfsdm_dai_component = {
 	.name = "stm32_dfsdm_audio",
-	.legacy_dai_naming = 1,
 };
 
 static void stm32_memcpy_32to16(void *dest, const void *src, size_t n)
@@ -297,16 +296,11 @@ static int stm32_adfsdm_pcm_new(struct snd_soc_component *component,
 static int stm32_adfsdm_dummy_cb(const void *data, void *private)
 {
 	/*
-	 * This dummy callback is requested by iio_channel_get_all_cb() API,
+	 * This dummmy callback is requested by iio_channel_get_all_cb() API,
 	 * but the stm32_dfsdm_get_buff_cb() API is used instead, to optimize
 	 * DMA transfers.
 	 */
 	return 0;
-}
-
-static void stm32_adfsdm_cleanup(void *data)
-{
-	iio_channel_release_all_cb(data);
 }
 
 static struct snd_soc_component_driver stm32_adfsdm_soc_platform = {
@@ -355,12 +349,6 @@ static int stm32_adfsdm_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->iio_cb))
 		return PTR_ERR(priv->iio_cb);
 
-	ret = devm_add_action_or_reset(&pdev->dev, stm32_adfsdm_cleanup, priv->iio_cb);
-	if (ret < 0)  {
-		dev_err(&pdev->dev, "Unable to add action\n");
-		return ret;
-	}
-
 	component = devm_kzalloc(&pdev->dev, sizeof(*component), GFP_KERNEL);
 	if (!component)
 		return -ENOMEM;
@@ -375,13 +363,9 @@ static int stm32_adfsdm_probe(struct platform_device *pdev)
 #endif
 
 	ret = snd_soc_add_component(component, NULL, 0);
-	if (ret < 0) {
+	if (ret < 0)
 		dev_err(&pdev->dev, "%s: Failed to register PCM platform\n",
 			__func__);
-		return ret;
-	}
-
-	pm_runtime_enable(&pdev->dev);
 
 	return ret;
 }
@@ -389,7 +373,6 @@ static int stm32_adfsdm_probe(struct platform_device *pdev)
 static int stm32_adfsdm_remove(struct platform_device *pdev)
 {
 	snd_soc_unregister_component(&pdev->dev);
-	pm_runtime_disable(&pdev->dev);
 
 	return 0;
 }

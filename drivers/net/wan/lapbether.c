@@ -301,7 +301,7 @@ static int lapbeth_set_mac_address(struct net_device *dev, void *addr)
 {
 	struct sockaddr *sa = addr;
 
-	dev_addr_set(dev, sa->sa_data);
+	memcpy(dev->dev_addr, sa->sa_data, dev->addr_len);
 	return 0;
 }
 
@@ -325,7 +325,6 @@ static int lapbeth_open(struct net_device *dev)
 
 	err = lapb_register(dev, &lapbeth_callbacks);
 	if (err != LAPB_OK) {
-		napi_disable(&lapbeth->napi);
 		pr_err("lapb_register error: %d\n", err);
 		return -ENODEV;
 	}
@@ -409,7 +408,7 @@ static int lapbeth_new_device(struct net_device *dev)
 	spin_lock_init(&lapbeth->up_lock);
 
 	skb_queue_head_init(&lapbeth->rx_queue);
-	netif_napi_add_weight(ndev, &lapbeth->napi, lapbeth_napi_poll, 16);
+	netif_napi_add(ndev, &lapbeth->napi, lapbeth_napi_poll, 16);
 
 	rc = -EIO;
 	if (register_netdevice(ndev))
@@ -447,7 +446,7 @@ static int lapbeth_device_event(struct notifier_block *this,
 	if (dev_net(dev) != &init_net)
 		return NOTIFY_DONE;
 
-	if (!dev_is_ethdev(dev) && !lapbeth_get_x25_dev(dev))
+	if (!dev_is_ethdev(dev))
 		return NOTIFY_DONE;
 
 	switch (event) {

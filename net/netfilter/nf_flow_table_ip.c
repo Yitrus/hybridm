@@ -8,6 +8,8 @@
 #include <linux/ipv6.h>
 #include <linux/netdevice.h>
 #include <linux/if_ether.h>
+#include <linux/if_pppox.h>
+#include <linux/ppp_defs.h>
 #include <net/ip.h>
 #include <net/ipv6.h>
 #include <net/ip6_route.h>
@@ -170,7 +172,6 @@ static int nf_flow_tuple_ip(struct sk_buff *skb, const struct net_device *dev,
 	struct flow_ports *ports;
 	unsigned int thoff;
 	struct iphdr *iph;
-	u8 ipproto;
 
 	if (!pskb_may_pull(skb, sizeof(*iph) + offset))
 		return -1;
@@ -184,19 +185,13 @@ static int nf_flow_tuple_ip(struct sk_buff *skb, const struct net_device *dev,
 
 	thoff += offset;
 
-	ipproto = iph->protocol;
-	switch (ipproto) {
+	switch (iph->protocol) {
 	case IPPROTO_TCP:
 		*hdrsize = sizeof(struct tcphdr);
 		break;
 	case IPPROTO_UDP:
 		*hdrsize = sizeof(struct udphdr);
 		break;
-#ifdef CONFIG_NF_CT_PROTO_GRE
-	case IPPROTO_GRE:
-		*hdrsize = sizeof(struct gre_base_hdr);
-		break;
-#endif
 	default:
 		return -1;
 	}
@@ -207,29 +202,15 @@ static int nf_flow_tuple_ip(struct sk_buff *skb, const struct net_device *dev,
 	if (!pskb_may_pull(skb, thoff + *hdrsize))
 		return -1;
 
-	switch (ipproto) {
-	case IPPROTO_TCP:
-	case IPPROTO_UDP:
-		ports = (struct flow_ports *)(skb_network_header(skb) + thoff);
-		tuple->src_port		= ports->source;
-		tuple->dst_port		= ports->dest;
-		break;
-	case IPPROTO_GRE: {
-		struct gre_base_hdr *greh;
-
-		greh = (struct gre_base_hdr *)(skb_network_header(skb) + thoff);
-		if ((greh->flags & GRE_VERSION) != GRE_VERSION_0)
-			return -1;
-		break;
-	}
-	}
-
 	iph = (struct iphdr *)(skb_network_header(skb) + offset);
+	ports = (struct flow_ports *)(skb_network_header(skb) + thoff);
 
 	tuple->src_v4.s_addr	= iph->saddr;
 	tuple->dst_v4.s_addr	= iph->daddr;
+	tuple->src_port		= ports->source;
+	tuple->dst_port		= ports->dest;
 	tuple->l3proto		= AF_INET;
-	tuple->l4proto		= ipproto;
+	tuple->l4proto		= iph->protocol;
 	tuple->iifidx		= dev->ifindex;
 	nf_flow_tuple_encap(skb, tuple);
 
@@ -248,15 +229,6 @@ static bool nf_flow_exceeds_mtu(const struct sk_buff *skb, unsigned int mtu)
 	return true;
 }
 
-static inline bool nf_flow_dst_check(struct flow_offload_tuple *tuple)
-{
-	if (tuple->xmit_type != FLOW_OFFLOAD_XMIT_NEIGH &&
-	    tuple->xmit_type != FLOW_OFFLOAD_XMIT_XFRM)
-		return true;
-
-	return dst_check(tuple->dst_cache, tuple->dst_cookie);
-}
-
 static unsigned int nf_flow_xmit_xfrm(struct sk_buff *skb,
 				      const struct nf_hook_state *state,
 				      struct dst_entry *dst)
@@ -265,6 +237,22 @@ static unsigned int nf_flow_xmit_xfrm(struct sk_buff *skb,
 	skb_dst_set_noref(skb, dst);
 	dst_output(state->net, state->sk, skb);
 	return NF_STOLEN;
+}
+
+static inline __be16 nf_flow_pppoe_proto(const struct sk_buff *skb)
+{
+	__be16 proto;
+
+	proto = *((__be16 *)(skb_mac_header(skb) + ETH_HLEN +
+			     sizeof(struct pppoe_hdr)));
+	switch (proto) {
+	case htons(PPP_IP):
+		return htons(ETH_P_IP);
+	case htons(PPP_IPV6):
+		return htons(ETH_P_IPV6);
+	}
+
+	return 0;
 }
 
 static bool nf_flow_skb_encap_protocol(const struct sk_buff *skb, __be16 proto,
@@ -376,11 +364,6 @@ nf_flow_offload_ip_hook(void *priv, struct sk_buff *skb,
 	if (nf_flow_state_check(flow, iph->protocol, skb, thoff))
 		return NF_ACCEPT;
 
-	if (!nf_flow_dst_check(&tuplehash->tuple)) {
-		flow_offload_teardown(flow);
-		return NF_ACCEPT;
-	}
-
 	if (skb_try_make_writable(skb, thoff + hdrsize))
 		return NF_DROP;
 
@@ -393,7 +376,7 @@ nf_flow_offload_ip_hook(void *priv, struct sk_buff *skb,
 	nf_flow_nat_ip(flow, skb, thoff, dir, iph);
 
 	ip_decrease_ttl(iph);
-	skb_clear_tstamp(skb);
+	skb->tstamp = 0;
 
 	if (flow_table->flags & NF_FLOWTABLE_COUNTER)
 		nf_ct_acct_update(flow->ct, tuplehash->tuple.dir, skb->len);
@@ -420,10 +403,6 @@ nf_flow_offload_ip_hook(void *priv, struct sk_buff *skb,
 		ret = nf_flow_queue_xmit(state->net, skb, tuplehash, ETH_P_IP);
 		if (ret == NF_DROP)
 			flow_offload_teardown(flow);
-		break;
-	default:
-		WARN_ON_ONCE(1);
-		ret = NF_DROP;
 		break;
 	}
 
@@ -542,7 +521,6 @@ static int nf_flow_tuple_ipv6(struct sk_buff *skb, const struct net_device *dev,
 	struct flow_ports *ports;
 	struct ipv6hdr *ip6h;
 	unsigned int thoff;
-	u8 nexthdr;
 
 	thoff = sizeof(*ip6h) + offset;
 	if (!pskb_may_pull(skb, thoff))
@@ -550,19 +528,13 @@ static int nf_flow_tuple_ipv6(struct sk_buff *skb, const struct net_device *dev,
 
 	ip6h = (struct ipv6hdr *)(skb_network_header(skb) + offset);
 
-	nexthdr = ip6h->nexthdr;
-	switch (nexthdr) {
+	switch (ip6h->nexthdr) {
 	case IPPROTO_TCP:
 		*hdrsize = sizeof(struct tcphdr);
 		break;
 	case IPPROTO_UDP:
 		*hdrsize = sizeof(struct udphdr);
 		break;
-#ifdef CONFIG_NF_CT_PROTO_GRE
-	case IPPROTO_GRE:
-		*hdrsize = sizeof(struct gre_base_hdr);
-		break;
-#endif
 	default:
 		return -1;
 	}
@@ -573,29 +545,15 @@ static int nf_flow_tuple_ipv6(struct sk_buff *skb, const struct net_device *dev,
 	if (!pskb_may_pull(skb, thoff + *hdrsize))
 		return -1;
 
-	switch (nexthdr) {
-	case IPPROTO_TCP:
-	case IPPROTO_UDP:
-		ports = (struct flow_ports *)(skb_network_header(skb) + thoff);
-		tuple->src_port		= ports->source;
-		tuple->dst_port		= ports->dest;
-		break;
-	case IPPROTO_GRE: {
-		struct gre_base_hdr *greh;
-
-		greh = (struct gre_base_hdr *)(skb_network_header(skb) + thoff);
-		if ((greh->flags & GRE_VERSION) != GRE_VERSION_0)
-			return -1;
-		break;
-	}
-	}
-
 	ip6h = (struct ipv6hdr *)(skb_network_header(skb) + offset);
+	ports = (struct flow_ports *)(skb_network_header(skb) + thoff);
 
 	tuple->src_v6		= ip6h->saddr;
 	tuple->dst_v6		= ip6h->daddr;
+	tuple->src_port		= ports->source;
+	tuple->dst_port		= ports->dest;
 	tuple->l3proto		= AF_INET6;
-	tuple->l4proto		= nexthdr;
+	tuple->l4proto		= ip6h->nexthdr;
 	tuple->iifidx		= dev->ifindex;
 	nf_flow_tuple_encap(skb, tuple);
 
@@ -642,11 +600,6 @@ nf_flow_offload_ipv6_hook(void *priv, struct sk_buff *skb,
 	if (nf_flow_state_check(flow, ip6h->nexthdr, skb, thoff))
 		return NF_ACCEPT;
 
-	if (!nf_flow_dst_check(&tuplehash->tuple)) {
-		flow_offload_teardown(flow);
-		return NF_ACCEPT;
-	}
-
 	if (skb_try_make_writable(skb, thoff + hdrsize))
 		return NF_DROP;
 
@@ -658,7 +611,7 @@ nf_flow_offload_ipv6_hook(void *priv, struct sk_buff *skb,
 	nf_flow_nat_ipv6(flow, skb, dir, ip6h);
 
 	ip6h->hop_limit--;
-	skb_clear_tstamp(skb);
+	skb->tstamp = 0;
 
 	if (flow_table->flags & NF_FLOWTABLE_COUNTER)
 		nf_ct_acct_update(flow->ct, tuplehash->tuple.dir, skb->len);
@@ -685,10 +638,6 @@ nf_flow_offload_ipv6_hook(void *priv, struct sk_buff *skb,
 		ret = nf_flow_queue_xmit(state->net, skb, tuplehash, ETH_P_IPV6);
 		if (ret == NF_DROP)
 			flow_offload_teardown(flow);
-		break;
-	default:
-		WARN_ON_ONCE(1);
-		ret = NF_DROP;
 		break;
 	}
 

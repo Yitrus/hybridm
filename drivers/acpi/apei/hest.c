@@ -86,9 +86,7 @@ static int hest_esrc_len(struct acpi_hest_header *hest_hdr)
 	return len;
 };
 
-typedef int (*apei_hest_func_t)(struct acpi_hest_header *hest_hdr, void *data);
-
-static int apei_hest_parse(apei_hest_func_t func, void *data)
+int apei_hest_parse(apei_hest_func_t func, void *data)
 {
 	struct acpi_hest_header *hest_hdr;
 	int i, rc, len;
@@ -123,6 +121,7 @@ static int apei_hest_parse(apei_hest_func_t func, void *data)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(apei_hest_parse);
 
 /*
  * Check if firmware advertises firmware first mode. We need FF bit to be set
@@ -224,7 +223,7 @@ err:
 static int __init setup_hest_disable(char *str)
 {
 	hest_disable = HEST_DISABLED;
-	return 1;
+	return 0;
 }
 
 __setup("hest_disable", setup_hest_disable);

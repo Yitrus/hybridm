@@ -20,15 +20,17 @@
 
 #include "ms5611.h"
 
-static int ms5611_i2c_reset(struct ms5611_state *st)
+static int ms5611_i2c_reset(struct device *dev)
 {
+	struct ms5611_state *st = iio_priv(dev_to_iio_dev(dev));
+
 	return i2c_smbus_write_byte(st->client, MS5611_RESET);
 }
 
-static int ms5611_i2c_read_prom_word(struct ms5611_state *st, int index,
-				     u16 *word)
+static int ms5611_i2c_read_prom_word(struct device *dev, int index, u16 *word)
 {
 	int ret;
+	struct ms5611_state *st = iio_priv(dev_to_iio_dev(dev));
 
 	ret = i2c_smbus_read_word_swapped(st->client,
 			MS5611_READ_PROM_WORD + (index << 1));
@@ -55,10 +57,11 @@ static int ms5611_i2c_read_adc(struct ms5611_state *st, s32 *val)
 	return 0;
 }
 
-static int ms5611_i2c_read_adc_temp_and_pressure(struct ms5611_state *st,
+static int ms5611_i2c_read_adc_temp_and_pressure(struct device *dev,
 						 s32 *temp, s32 *pressure)
 {
 	int ret;
+	struct ms5611_state *st = iio_priv(dev_to_iio_dev(dev));
 	const struct ms5611_osr *osr = st->temp_osr;
 
 	ret = i2c_smbus_write_byte(st->client, osr->cmd);
@@ -79,9 +82,9 @@ static int ms5611_i2c_read_adc_temp_and_pressure(struct ms5611_state *st,
 	return ms5611_i2c_read_adc(st, pressure);
 }
 
-static int ms5611_i2c_probe(struct i2c_client *client)
+static int ms5611_i2c_probe(struct i2c_client *client,
+			    const struct i2c_device_id *id)
 {
-	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct ms5611_state *st;
 	struct iio_dev *indio_dev;
 
@@ -105,9 +108,9 @@ static int ms5611_i2c_probe(struct i2c_client *client)
 	return ms5611_probe(indio_dev, &client->dev, id->name, id->driver_data);
 }
 
-static void ms5611_i2c_remove(struct i2c_client *client)
+static int ms5611_i2c_remove(struct i2c_client *client)
 {
-	ms5611_remove(i2c_get_clientdata(client));
+	return ms5611_remove(i2c_get_clientdata(client));
 }
 
 static const struct of_device_id ms5611_i2c_matches[] = {
@@ -130,7 +133,7 @@ static struct i2c_driver ms5611_driver = {
 		.of_match_table = ms5611_i2c_matches,
 	},
 	.id_table = ms5611_id,
-	.probe_new = ms5611_i2c_probe,
+	.probe = ms5611_i2c_probe,
 	.remove = ms5611_i2c_remove,
 };
 module_i2c_driver(ms5611_driver);
@@ -138,4 +141,3 @@ module_i2c_driver(ms5611_driver);
 MODULE_AUTHOR("Tomasz Duszynski <tduszyns@gmail.com>");
 MODULE_DESCRIPTION("MS5611 i2c driver");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(IIO_MS5611);

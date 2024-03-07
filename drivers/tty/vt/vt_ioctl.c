@@ -599,8 +599,8 @@ static int vt_setactivate(struct vt_setactivate __user *sa)
 	if (vsa.console == 0 || vsa.console > MAX_NR_CONSOLES)
 		return -ENXIO;
 
+	vsa.console = array_index_nospec(vsa.console, MAX_NR_CONSOLES + 1);
 	vsa.console--;
-	vsa.console = array_index_nospec(vsa.console, MAX_NR_CONSOLES);
 	console_lock();
 	ret = vc_allocate(vsa.console);
 	if (ret) {
@@ -845,7 +845,6 @@ int vt_ioctl(struct tty_struct *tty,
 			return -ENXIO;
 
 		arg--;
-		arg = array_index_nospec(arg, MAX_NR_CONSOLES);
 		console_lock();
 		ret = vc_allocate(arg);
 		console_unlock();
@@ -898,13 +897,11 @@ int vt_ioctl(struct tty_struct *tty,
 		if (arg > MAX_NR_CONSOLES)
 			return -ENXIO;
 
-		if (arg == 0) {
+		if (arg == 0)
 			vt_disallocate_all();
-			break;
-		}
-
-		arg = array_index_nospec(arg - 1, MAX_NR_CONSOLES);
-		return vt_disallocate(arg);
+		else
+			return vt_disallocate(--arg);
+		break;
 
 	case VT_RESIZE:
 	{

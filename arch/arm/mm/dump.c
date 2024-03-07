@@ -26,7 +26,7 @@ static struct addr_marker address_markers[] = {
 	{ MODULES_VADDR,	"Modules" },
 	{ PAGE_OFFSET,		"Kernel Mapping" },
 	{ 0,			"vmalloc() Area" },
-	{ FDT_FIXED_BASE,	"FDT Area" },
+	{ VMALLOC_END,		"vmalloc() End" },
 	{ FIXADDR_START,	"Fixmap Area" },
 	{ VECTORS_BASE,	"Vectors" },
 	{ VECTORS_BASE + PAGE_SIZE * 2, "Vectors End" },
@@ -200,7 +200,6 @@ static const struct prot_bits section_bits[] = {
 };
 
 struct pg_level {
-	const char *name;
 	const struct prot_bits *bits;
 	size_t num;
 	u64 mask;
@@ -214,11 +213,9 @@ static struct pg_level pg_level[] = {
 	}, { /* p4d */
 	}, { /* pud */
 	}, { /* pmd */
-		.name	= (CONFIG_PGTABLE_LEVELS > 2) ? "PMD" : "PGD",
 		.bits	= section_bits,
 		.num	= ARRAY_SIZE(section_bits),
 	}, { /* pte */
-		.name	= "PTE",
 		.bits	= pte_bits,
 		.num	= ARRAY_SIZE(pte_bits),
 	},
@@ -285,8 +282,7 @@ static void note_page(struct pg_state *st, unsigned long addr,
 				delta >>= 10;
 				unit++;
 			}
-			pt_dump_seq_printf(st->seq, "%9lu%c %s", delta, *unit,
-					   pg_level[st->level].name);
+			pt_dump_seq_printf(st->seq, "%9lu%c", delta, *unit);
 			if (st->current_domain)
 				pt_dump_seq_printf(st->seq, " %s",
 							st->current_domain);
@@ -350,7 +346,7 @@ static void walk_pmd(struct pg_state *st, pud_t *pud, unsigned long start)
 		addr = start + i * PMD_SIZE;
 		domain = get_domain_name(pmd);
 		if (pmd_none(*pmd) || pmd_large(*pmd) || !pmd_present(*pmd))
-			note_page(st, addr, 4, pmd_val(*pmd), domain);
+			note_page(st, addr, 3, pmd_val(*pmd), domain);
 		else
 			walk_pte(st, pmd, addr, domain);
 

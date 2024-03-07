@@ -1239,8 +1239,7 @@ static void myrb_cleanup(struct myrb_hba *cb)
 	myrb_unmap(cb);
 
 	if (cb->mmio_base) {
-		if (cb->disable_intr)
-			cb->disable_intr(cb->io_base);
+		cb->disable_intr(cb->io_base);
 		iounmap(cb->mmio_base);
 	}
 	if (cb->irq)
@@ -1283,7 +1282,7 @@ static int myrb_pthru_queuecommand(struct Scsi_Host *shost,
 	if (nsge > 1) {
 		dma_pool_free(cb->dcdb_pool, dcdb, dcdb_addr);
 		scmd->result = (DID_ERROR << 16);
-		scsi_done(scmd);
+		scmd->scsi_done(scmd);
 		return 0;
 	}
 
@@ -1437,13 +1436,13 @@ static int myrb_ldev_queuecommand(struct Scsi_Host *shost,
 		dev_dbg(&shost->shost_gendev, "ldev %u in state %x, skip\n",
 			sdev->id, ldev_info ? ldev_info->state : 0xff);
 		scmd->result = (DID_BAD_TARGET << 16);
-		scsi_done(scmd);
+		scmd->scsi_done(scmd);
 		return 0;
 	}
 	switch (scmd->cmnd[0]) {
 	case TEST_UNIT_READY:
 		scmd->result = (DID_OK << 16);
-		scsi_done(scmd);
+		scmd->scsi_done(scmd);
 		return 0;
 	case INQUIRY:
 		if (scmd->cmnd[1] & 1) {
@@ -1453,11 +1452,11 @@ static int myrb_ldev_queuecommand(struct Scsi_Host *shost,
 			myrb_inquiry(cb, scmd);
 			scmd->result = (DID_OK << 16);
 		}
-		scsi_done(scmd);
+		scmd->scsi_done(scmd);
 		return 0;
 	case SYNCHRONIZE_CACHE:
 		scmd->result = (DID_OK << 16);
-		scsi_done(scmd);
+		scmd->scsi_done(scmd);
 		return 0;
 	case MODE_SENSE:
 		if ((scmd->cmnd[2] & 0x3F) != 0x3F &&
@@ -1468,25 +1467,25 @@ static int myrb_ldev_queuecommand(struct Scsi_Host *shost,
 			myrb_mode_sense(cb, scmd, ldev_info);
 			scmd->result = (DID_OK << 16);
 		}
-		scsi_done(scmd);
+		scmd->scsi_done(scmd);
 		return 0;
 	case READ_CAPACITY:
 		if ((scmd->cmnd[1] & 1) ||
 		    (scmd->cmnd[8] & 1)) {
 			/* Illegal request, invalid field in CDB */
 			scsi_build_sense(scmd, 0, ILLEGAL_REQUEST, 0x24, 0);
-			scsi_done(scmd);
+			scmd->scsi_done(scmd);
 			return 0;
 		}
 		lba = get_unaligned_be32(&scmd->cmnd[2]);
 		if (lba) {
 			/* Illegal request, invalid field in CDB */
 			scsi_build_sense(scmd, 0, ILLEGAL_REQUEST, 0x24, 0);
-			scsi_done(scmd);
+			scmd->scsi_done(scmd);
 			return 0;
 		}
 		myrb_read_capacity(cb, scmd, ldev_info);
-		scsi_done(scmd);
+		scmd->scsi_done(scmd);
 		return 0;
 	case REQUEST_SENSE:
 		myrb_request_sense(cb, scmd);
@@ -1500,13 +1499,13 @@ static int myrb_ldev_queuecommand(struct Scsi_Host *shost,
 			/* Assume good status */
 			scmd->result = (DID_OK << 16);
 		}
-		scsi_done(scmd);
+		scmd->scsi_done(scmd);
 		return 0;
 	case READ_6:
 		if (ldev_info->state == MYRB_DEVICE_WO) {
 			/* Data protect, attempt to read invalid data */
 			scsi_build_sense(scmd, 0, DATA_PROTECT, 0x21, 0x06);
-			scsi_done(scmd);
+			scmd->scsi_done(scmd);
 			return 0;
 		}
 		fallthrough;
@@ -1520,7 +1519,7 @@ static int myrb_ldev_queuecommand(struct Scsi_Host *shost,
 		if (ldev_info->state == MYRB_DEVICE_WO) {
 			/* Data protect, attempt to read invalid data */
 			scsi_build_sense(scmd, 0, DATA_PROTECT, 0x21, 0x06);
-			scsi_done(scmd);
+			scmd->scsi_done(scmd);
 			return 0;
 		}
 		fallthrough;
@@ -1534,7 +1533,7 @@ static int myrb_ldev_queuecommand(struct Scsi_Host *shost,
 		if (ldev_info->state == MYRB_DEVICE_WO) {
 			/* Data protect, attempt to read invalid data */
 			scsi_build_sense(scmd, 0, DATA_PROTECT, 0x21, 0x06);
-			scsi_done(scmd);
+			scmd->scsi_done(scmd);
 			return 0;
 		}
 		fallthrough;
@@ -1547,7 +1546,7 @@ static int myrb_ldev_queuecommand(struct Scsi_Host *shost,
 	default:
 		/* Illegal request, invalid opcode */
 		scsi_build_sense(scmd, 0, ILLEGAL_REQUEST, 0x20, 0);
-		scsi_done(scmd);
+		scmd->scsi_done(scmd);
 		return 0;
 	}
 
@@ -1611,7 +1610,7 @@ static int myrb_queuecommand(struct Scsi_Host *shost,
 
 	if (sdev->channel > myrb_logical_channel(shost)) {
 		scmd->result = (DID_BAD_TARGET << 16);
-		scsi_done(scmd);
+		scmd->scsi_done(scmd);
 		return 0;
 	}
 	if (sdev->channel == myrb_logical_channel(shost))
@@ -1675,7 +1674,7 @@ static int myrb_pdev_slave_alloc(struct scsi_device *sdev)
 	if (sdev->id > MYRB_MAX_TARGETS)
 		return -ENXIO;
 
-	pdev_info = kzalloc(sizeof(*pdev_info), GFP_KERNEL);
+	pdev_info = kzalloc(sizeof(*pdev_info), GFP_KERNEL|GFP_DMA);
 	if (!pdev_info)
 		return -ENOMEM;
 
@@ -2183,25 +2182,21 @@ static ssize_t flush_cache_store(struct device *dev,
 }
 static DEVICE_ATTR_WO(flush_cache);
 
-static struct attribute *myrb_sdev_attrs[] = {
-	&dev_attr_rebuild.attr,
-	&dev_attr_consistency_check.attr,
-	&dev_attr_raid_state.attr,
-	&dev_attr_raid_level.attr,
+static struct device_attribute *myrb_sdev_attrs[] = {
+	&dev_attr_rebuild,
+	&dev_attr_consistency_check,
+	&dev_attr_raid_state,
+	&dev_attr_raid_level,
 	NULL,
 };
 
-ATTRIBUTE_GROUPS(myrb_sdev);
-
-static struct attribute *myrb_shost_attrs[] = {
-	&dev_attr_ctlr_num.attr,
-	&dev_attr_model.attr,
-	&dev_attr_firmware.attr,
-	&dev_attr_flush_cache.attr,
+static struct device_attribute *myrb_shost_attrs[] = {
+	&dev_attr_ctlr_num,
+	&dev_attr_model,
+	&dev_attr_firmware,
+	&dev_attr_flush_cache,
 	NULL,
 };
-
-ATTRIBUTE_GROUPS(myrb_shost);
 
 static struct scsi_host_template myrb_template = {
 	.module			= THIS_MODULE,
@@ -2214,8 +2209,8 @@ static struct scsi_host_template myrb_template = {
 	.slave_destroy		= myrb_slave_destroy,
 	.bios_param		= myrb_biosparam,
 	.cmd_size		= sizeof(struct myrb_cmdblk),
-	.shost_groups		= myrb_shost_groups,
-	.sdev_groups		= myrb_sdev_groups,
+	.shost_attrs		= myrb_shost_attrs,
+	.sdev_attrs		= myrb_sdev_attrs,
 	.this_id		= -1,
 };
 
@@ -2366,7 +2361,7 @@ static void myrb_handle_scsi(struct myrb_hba *cb, struct myrb_cmdblk *cmd_blk,
 		scmd->result = (DID_ERROR << 16);
 		break;
 	}
-	scsi_done(scmd);
+	scmd->scsi_done(scmd);
 }
 
 static void myrb_handle_cmdblk(struct myrb_hba *cb, struct myrb_cmdblk *cmd_blk)
@@ -3414,13 +3409,9 @@ static struct myrb_hba *myrb_detect(struct pci_dev *pdev,
 	mutex_init(&cb->dcmd_mutex);
 	mutex_init(&cb->dma_mutex);
 	cb->pdev = pdev;
-	cb->host = shost;
 
-	if (pci_enable_device(pdev)) {
-		dev_err(&pdev->dev, "Failed to enable PCI device\n");
-		scsi_host_put(shost);
-		return NULL;
-	}
+	if (pci_enable_device(pdev))
+		goto failure;
 
 	if (privdata->hw_init == DAC960_PD_hw_init ||
 	    privdata->hw_init == DAC960_P_hw_init) {

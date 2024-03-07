@@ -1,3 +1,7 @@
+/* memtis core functions
+ * author: Taehyung Lee (Sungkyunkwan Univ.)
+ * mail: taehyunggg@skku.edu
+ */
 #include <linux/mm.h>
 #include <linux/kernel.h>
 #include <linux/huge_mm.h>

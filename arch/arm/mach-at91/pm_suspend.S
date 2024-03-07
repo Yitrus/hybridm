@@ -12,10 +12,6 @@
 #include "pm.h"
 #include "pm_data-offsets.h"
 
-#ifdef CONFIG_CPU_V7
-.arch armv7-a
-#endif
-
 #define	SRAMC_SELF_FRESH_ACTIVE		0x01
 #define	SRAMC_SELF_FRESH_EXIT		0x00
 
@@ -163,7 +159,7 @@ sr_ena_1:
 
 	/* Switch to self-refresh. */
 	ldr	tmp1, [r2, #UDDRC_PWRCTL]
-	orr	tmp1, tmp1, #UDDRC_PWRCTL_SELFREF_SW
+	orr	tmp1, tmp1, #UDDRC_PWRCTRL_SELFREF_SW
 	str	tmp1, [r2, #UDDRC_PWRCTL]
 
 sr_ena_2:
@@ -173,23 +169,12 @@ sr_ena_2:
 	cmp	tmp1, #UDDRC_STAT_SELFREF_TYPE_SW
 	bne	sr_ena_2
 
-	/* Disable DX DLLs for non-backup modes. */
+	/* Put DDR PHY's DLL in bypass mode for non-backup modes. */
 	cmp	r7, #AT91_PM_BACKUP
 	beq	sr_ena_3
-
-	/* Do not soft reset the AC DLL. */
-	ldr	tmp1, [r3, DDR3PHY_ACDLLCR]
-	bic	tmp1, tmp1, DDR3PHY_ACDLLCR_DLLSRST
-	str	tmp1, [r3, DDR3PHY_ACDLLCR]
-
-	/* Disable DX DLLs. */
-	ldr	tmp1, [r3, #DDR3PHY_DX0DLLCR]
-	orr	tmp1, tmp1, #DDR3PHY_DXDLLCR_DLLDIS
-	str	tmp1, [r3, #DDR3PHY_DX0DLLCR]
-
-	ldr	tmp1, [r3, #DDR3PHY_DX1DLLCR]
-	orr	tmp1, tmp1, #DDR3PHY_DXDLLCR_DLLDIS
-	str	tmp1, [r3, #DDR3PHY_DX1DLLCR]
+	ldr	tmp1, [r3, #DDR3PHY_PIR]
+	orr	tmp1, tmp1, #DDR3PHY_PIR_DLLBYP
+	str	tmp1, [r3, #DDR3PHY_PIR]
 
 sr_ena_3:
 	/* Power down DDR PHY data receivers. */
@@ -236,14 +221,10 @@ sr_ena_3:
 	bic	tmp1, tmp1, #DDR3PHY_DSGCR_ODTPDD_ODT0
 	str	tmp1, [r3, #DDR3PHY_DSGCR]
 
-	/* Enable DX DLLs. */
-	ldr	tmp1, [r3, #DDR3PHY_DX0DLLCR]
-	bic	tmp1, tmp1, #DDR3PHY_DXDLLCR_DLLDIS
-	str	tmp1, [r3, #DDR3PHY_DX0DLLCR]
-
-	ldr	tmp1, [r3, #DDR3PHY_DX1DLLCR]
-	bic	tmp1, tmp1, #DDR3PHY_DXDLLCR_DLLDIS
-	str	tmp1, [r3, #DDR3PHY_DX1DLLCR]
+	/* Take DDR PHY's DLL out of bypass mode. */
+	ldr	tmp1, [r3, #DDR3PHY_PIR]
+	bic	tmp1, tmp1, #DDR3PHY_PIR_DLLBYP
+	str	tmp1, [r3, #DDR3PHY_PIR]
 
 	/* Enable quasi-dynamic programming. */
 	mov	tmp1, #0
@@ -295,7 +276,7 @@ sr_dis_5:
 
 	/* Trigger self-refresh exit. */
 	ldr	tmp1, [r2, #UDDRC_PWRCTL]
-	bic	tmp1, tmp1, #UDDRC_PWRCTL_SELFREF_SW
+	bic	tmp1, tmp1, #UDDRC_PWRCTRL_SELFREF_SW
 	str	tmp1, [r2, #UDDRC_PWRCTL]
 
 sr_dis_6:

@@ -160,7 +160,7 @@ static void map_set(u64 *up_map, int i, unsigned int v)
 
 static int map_get(u64 up_map, int i)
 {
-	return (up_map & (1ULL << i)) >> i;
+	return (up_map & (1 << i)) >> i;
 }
 
 static struct tipc_peer *peer_prev(struct tipc_peer *peer)
@@ -496,8 +496,6 @@ void tipc_mon_rcv(struct net *net, void *data, u16 dlen, u32 addr,
 	state->probing = false;
 
 	/* Sanity check received domain record */
-	if (new_member_cnt > MAX_MON_DOMAIN)
-		return;
 	if (dlen < dom_rec_len(arrv_dom, 0))
 		return;
 	if (dlen != dom_rec_len(arrv_dom, new_member_cnt))
@@ -700,7 +698,7 @@ void tipc_mon_delete(struct net *net, int bearer_id)
 	}
 	mon->self = NULL;
 	write_unlock_bh(&mon->lock);
-	timer_shutdown_sync(&mon->timer);
+	del_timer_sync(&mon->timer);
 	kfree(self->domain);
 	kfree(self);
 	kfree(mon);

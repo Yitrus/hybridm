@@ -220,15 +220,15 @@ static void be_get_drvinfo(struct net_device *netdev,
 {
 	struct be_adapter *adapter = netdev_priv(netdev);
 
-	strscpy(drvinfo->driver, DRV_NAME, sizeof(drvinfo->driver));
+	strlcpy(drvinfo->driver, DRV_NAME, sizeof(drvinfo->driver));
 	if (!memcmp(adapter->fw_ver, adapter->fw_on_flash, FW_VER_LEN))
-		strscpy(drvinfo->fw_version, adapter->fw_ver,
+		strlcpy(drvinfo->fw_version, adapter->fw_ver,
 			sizeof(drvinfo->fw_version));
 	else
 		snprintf(drvinfo->fw_version, sizeof(drvinfo->fw_version),
 			 "%s [%s]", adapter->fw_ver, adapter->fw_on_flash);
 
-	strscpy(drvinfo->bus_info, pci_name(adapter->pdev),
+	strlcpy(drvinfo->bus_info, pci_name(adapter->pdev),
 		sizeof(drvinfo->bus_info));
 }
 
@@ -389,10 +389,10 @@ static void be_get_ethtool_stats(struct net_device *netdev,
 		struct be_rx_stats *stats = rx_stats(rxo);
 
 		do {
-			start = u64_stats_fetch_begin(&stats->sync);
+			start = u64_stats_fetch_begin_irq(&stats->sync);
 			data[base] = stats->rx_bytes;
 			data[base + 1] = stats->rx_pkts;
-		} while (u64_stats_fetch_retry(&stats->sync, start));
+		} while (u64_stats_fetch_retry_irq(&stats->sync, start));
 
 		for (i = 2; i < ETHTOOL_RXSTATS_NUM; i++) {
 			p = (u8 *)stats + et_rx_stats[i].offset;
@@ -405,19 +405,19 @@ static void be_get_ethtool_stats(struct net_device *netdev,
 		struct be_tx_stats *stats = tx_stats(txo);
 
 		do {
-			start = u64_stats_fetch_begin(&stats->sync_compl);
+			start = u64_stats_fetch_begin_irq(&stats->sync_compl);
 			data[base] = stats->tx_compl;
-		} while (u64_stats_fetch_retry(&stats->sync_compl, start));
+		} while (u64_stats_fetch_retry_irq(&stats->sync_compl, start));
 
 		do {
-			start = u64_stats_fetch_begin(&stats->sync);
+			start = u64_stats_fetch_begin_irq(&stats->sync);
 			for (i = 1; i < ETHTOOL_TXSTATS_NUM; i++) {
 				p = (u8 *)stats + et_tx_stats[i].offset;
 				data[base + i] =
 					(et_tx_stats[i].size == sizeof(u64)) ?
 						*(u64 *)p : *(u32 *)p;
 			}
-		} while (u64_stats_fetch_retry(&stats->sync, start));
+		} while (u64_stats_fetch_retry_irq(&stats->sync, start));
 		base += ETHTOOL_TXSTATS_NUM;
 	}
 }
@@ -683,9 +683,7 @@ static int be_get_link_ksettings(struct net_device *netdev,
 }
 
 static void be_get_ringparam(struct net_device *netdev,
-			     struct ethtool_ringparam *ring,
-			     struct kernel_ethtool_ringparam *kernel_ring,
-			     struct netlink_ext_ack *extack)
+			     struct ethtool_ringparam *ring)
 {
 	struct be_adapter *adapter = netdev_priv(netdev);
 
@@ -1344,7 +1342,7 @@ static int be_get_module_info(struct net_device *netdev,
 		return -EOPNOTSUPP;
 
 	status = be_cmd_read_port_transceiver_data(adapter, TR_PAGE_A0,
-						   0, PAGE_DATA_LEN, page_data);
+						   page_data);
 	if (!status) {
 		if (!page_data[SFP_PLUS_SFF_8472_COMP]) {
 			modinfo->type = ETH_MODULE_SFF_8079;
@@ -1362,32 +1360,25 @@ static int be_get_module_eeprom(struct net_device *netdev,
 {
 	struct be_adapter *adapter = netdev_priv(netdev);
 	int status;
-	u32 begin, end;
 
 	if (!check_privilege(adapter, MAX_PRIVILEGES))
 		return -EOPNOTSUPP;
 
-	begin = eeprom->offset;
-	end = eeprom->offset + eeprom->len;
+	status = be_cmd_read_port_transceiver_data(adapter, TR_PAGE_A0,
+						   data);
+	if (status)
+		goto err;
 
-	if (begin < PAGE_DATA_LEN) {
-		status = be_cmd_read_port_transceiver_data(adapter, TR_PAGE_A0, begin,
-							   min_t(u32, end, PAGE_DATA_LEN) - begin,
-							   data);
-		if (status)
-			goto err;
-
-		data += PAGE_DATA_LEN - begin;
-		begin = PAGE_DATA_LEN;
-	}
-
-	if (end > PAGE_DATA_LEN) {
-		status = be_cmd_read_port_transceiver_data(adapter, TR_PAGE_A2,
-							   begin - PAGE_DATA_LEN,
-							   end - begin, data);
+	if (eeprom->offset + eeprom->len > PAGE_DATA_LEN) {
+		status = be_cmd_read_port_transceiver_data(adapter,
+							   TR_PAGE_A2,
+							   data +
+							   PAGE_DATA_LEN);
 		if (status)
 			goto err;
 	}
+	if (eeprom->offset)
+		memcpy(data, data + eeprom->offset, eeprom->len);
 err:
 	return be_cmd_status(status);
 }

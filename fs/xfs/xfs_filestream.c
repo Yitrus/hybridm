@@ -126,14 +126,13 @@ xfs_filestream_pick_ag(
 		pag = xfs_perag_get(mp, ag);
 
 		if (!pag->pagf_init) {
-			err = xfs_alloc_read_agf(pag, NULL, trylock, NULL);
+			err = xfs_alloc_pagf_init(mp, NULL, ag, trylock);
 			if (err) {
-				if (err != -EAGAIN) {
-					xfs_perag_put(pag);
+				xfs_perag_put(pag);
+				if (err != -EAGAIN)
 					return err;
-				}
 				/* Couldn't lock the AGF, skip this AG. */
-				goto next_ag;
+				continue;
 			}
 		}
 
@@ -181,7 +180,7 @@ next_ag:
 		if (ag != startag)
 			continue;
 
-		/* Allow sleeping in xfs_alloc_read_agf() on the 2nd pass. */
+		/* Allow sleeping in xfs_alloc_pagf_init() on the 2nd pass. */
 		if (trylock != 0) {
 			trylock = 0;
 			continue;

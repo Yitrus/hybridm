@@ -30,8 +30,6 @@
 #define MAX_STRERR_LEN 256
 #define MAX_TEST_NAME 80
 
-#define __always_unused	__attribute__((__unused__))
-
 #define _FAIL(errnum, fmt...)                                                  \
 	({                                                                     \
 		error_at_line(0, (errnum), __func__, __LINE__, fmt);           \
@@ -323,8 +321,7 @@ static int socket_loopback(int family, int sotype)
 	return socket_loopback_reuseport(family, sotype, -1);
 }
 
-static void test_insert_invalid(struct test_sockmap_listen *skel __always_unused,
-				int family, int sotype, int mapfd)
+static void test_insert_invalid(int family, int sotype, int mapfd)
 {
 	u32 key = 0;
 	u64 value;
@@ -341,8 +338,7 @@ static void test_insert_invalid(struct test_sockmap_listen *skel __always_unused
 		FAIL_ERRNO("map_update: expected EBADF");
 }
 
-static void test_insert_opened(struct test_sockmap_listen *skel __always_unused,
-			       int family, int sotype, int mapfd)
+static void test_insert_opened(int family, int sotype, int mapfd)
 {
 	u32 key = 0;
 	u64 value;
@@ -363,8 +359,7 @@ static void test_insert_opened(struct test_sockmap_listen *skel __always_unused,
 	xclose(s);
 }
 
-static void test_insert_bound(struct test_sockmap_listen *skel __always_unused,
-			      int family, int sotype, int mapfd)
+static void test_insert_bound(int family, int sotype, int mapfd)
 {
 	struct sockaddr_storage addr;
 	socklen_t len;
@@ -391,8 +386,7 @@ close:
 	xclose(s);
 }
 
-static void test_insert(struct test_sockmap_listen *skel __always_unused,
-			int family, int sotype, int mapfd)
+static void test_insert(int family, int sotype, int mapfd)
 {
 	u64 value;
 	u32 key;
@@ -408,8 +402,7 @@ static void test_insert(struct test_sockmap_listen *skel __always_unused,
 	xclose(s);
 }
 
-static void test_delete_after_insert(struct test_sockmap_listen *skel __always_unused,
-				     int family, int sotype, int mapfd)
+static void test_delete_after_insert(int family, int sotype, int mapfd)
 {
 	u64 value;
 	u32 key;
@@ -426,8 +419,7 @@ static void test_delete_after_insert(struct test_sockmap_listen *skel __always_u
 	xclose(s);
 }
 
-static void test_delete_after_close(struct test_sockmap_listen *skel __always_unused,
-				    int family, int sotype, int mapfd)
+static void test_delete_after_close(int family, int sotype, int mapfd)
 {
 	int err, s;
 	u64 value;
@@ -450,8 +442,7 @@ static void test_delete_after_close(struct test_sockmap_listen *skel __always_un
 		FAIL_ERRNO("map_delete: expected EINVAL/EINVAL");
 }
 
-static void test_lookup_after_insert(struct test_sockmap_listen *skel __always_unused,
-				     int family, int sotype, int mapfd)
+static void test_lookup_after_insert(int family, int sotype, int mapfd)
 {
 	u64 cookie, value;
 	socklen_t len;
@@ -479,8 +470,7 @@ static void test_lookup_after_insert(struct test_sockmap_listen *skel __always_u
 	xclose(s);
 }
 
-static void test_lookup_after_delete(struct test_sockmap_listen *skel __always_unused,
-				     int family, int sotype, int mapfd)
+static void test_lookup_after_delete(int family, int sotype, int mapfd)
 {
 	int err, s;
 	u64 value;
@@ -503,8 +493,7 @@ static void test_lookup_after_delete(struct test_sockmap_listen *skel __always_u
 	xclose(s);
 }
 
-static void test_lookup_32_bit_value(struct test_sockmap_listen *skel __always_unused,
-				     int family, int sotype, int mapfd)
+static void test_lookup_32_bit_value(int family, int sotype, int mapfd)
 {
 	u32 key, value32;
 	int err, s;
@@ -513,8 +502,8 @@ static void test_lookup_32_bit_value(struct test_sockmap_listen *skel __always_u
 	if (s < 0)
 		return;
 
-	mapfd = bpf_map_create(BPF_MAP_TYPE_SOCKMAP, NULL, sizeof(key),
-			       sizeof(value32), 1, NULL);
+	mapfd = bpf_create_map(BPF_MAP_TYPE_SOCKMAP, sizeof(key),
+			       sizeof(value32), 1, 0);
 	if (mapfd < 0) {
 		FAIL_ERRNO("map_create");
 		goto close;
@@ -534,8 +523,7 @@ close:
 	xclose(s);
 }
 
-static void test_update_existing(struct test_sockmap_listen *skel __always_unused,
-				 int family, int sotype, int mapfd)
+static void test_update_existing(int family, int sotype, int mapfd)
 {
 	int s1, s2;
 	u64 value;
@@ -563,7 +551,7 @@ close_s1:
 /* Exercise the code path where we destroy child sockets that never
  * got accept()'ed, aka orphans, when parent socket gets closed.
  */
-static void do_destroy_orphan_child(int family, int sotype, int mapfd)
+static void test_destroy_orphan_child(int family, int sotype, int mapfd)
 {
 	struct sockaddr_storage addr;
 	socklen_t len;
@@ -594,38 +582,10 @@ close_srv:
 	xclose(s);
 }
 
-static void test_destroy_orphan_child(struct test_sockmap_listen *skel,
-				      int family, int sotype, int mapfd)
-{
-	int msg_verdict = bpf_program__fd(skel->progs.prog_msg_verdict);
-	int skb_verdict = bpf_program__fd(skel->progs.prog_skb_verdict);
-	const struct test {
-		int progfd;
-		enum bpf_attach_type atype;
-	} tests[] = {
-		{ -1, -1 },
-		{ msg_verdict, BPF_SK_MSG_VERDICT },
-		{ skb_verdict, BPF_SK_SKB_VERDICT },
-	};
-	const struct test *t;
-
-	for (t = tests; t < tests + ARRAY_SIZE(tests); t++) {
-		if (t->progfd != -1 &&
-		    xbpf_prog_attach(t->progfd, mapfd, t->atype, 0) != 0)
-			return;
-
-		do_destroy_orphan_child(family, sotype, mapfd);
-
-		if (t->progfd != -1)
-			xbpf_prog_detach2(t->progfd, mapfd, t->atype);
-	}
-}
-
 /* Perform a passive open after removing listening socket from SOCKMAP
  * to ensure that callbacks get restored properly.
  */
-static void test_clone_after_delete(struct test_sockmap_listen *skel __always_unused,
-				    int family, int sotype, int mapfd)
+static void test_clone_after_delete(int family, int sotype, int mapfd)
 {
 	struct sockaddr_storage addr;
 	socklen_t len;
@@ -661,8 +621,7 @@ close_srv:
  * SOCKMAP, but got accept()'ed only after the parent has been removed
  * from SOCKMAP, gets cloned without parent psock state or callbacks.
  */
-static void test_accept_after_delete(struct test_sockmap_listen *skel __always_unused,
-				     int family, int sotype, int mapfd)
+static void test_accept_after_delete(int family, int sotype, int mapfd)
 {
 	struct sockaddr_storage addr;
 	const u32 zero = 0;
@@ -716,8 +675,7 @@ close_srv:
 /* Check that child socket that got created and accepted while parent
  * was in a SOCKMAP is cloned without parent psock state or callbacks.
  */
-static void test_accept_before_delete(struct test_sockmap_listen *skel __always_unused,
-				      int family, int sotype, int mapfd)
+static void test_accept_before_delete(int family, int sotype, int mapfd)
 {
 	struct sockaddr_storage addr;
 	const u32 zero = 0, one = 1;
@@ -826,8 +784,7 @@ done:
 	return NULL;
 }
 
-static void test_syn_recv_insert_delete(struct test_sockmap_listen *skel __always_unused,
-					int family, int sotype, int mapfd)
+static void test_syn_recv_insert_delete(int family, int sotype, int mapfd)
 {
 	struct connect_accept_ctx ctx = { 0 };
 	struct sockaddr_storage addr;
@@ -890,8 +847,7 @@ static void *listen_thread(void *arg)
 	return NULL;
 }
 
-static void test_race_insert_listen(struct test_sockmap_listen *skel __always_unused,
-				    int family, int socktype, int mapfd)
+static void test_race_insert_listen(int family, int socktype, int mapfd)
 {
 	struct connect_accept_ctx ctx = { 0 };
 	const u32 zero = 0;
@@ -1457,12 +1413,14 @@ close_srv1:
 
 static void test_ops_cleanup(const struct bpf_map *map)
 {
+	const struct bpf_map_def *def;
 	int err, mapfd;
 	u32 key;
 
+	def = bpf_map__def(map);
 	mapfd = bpf_map__fd(map);
 
-	for (key = 0; key < bpf_map__max_entries(map); key++) {
+	for (key = 0; key < def->max_entries; key++) {
 		err = bpf_map_delete_elem(mapfd, &key);
 		if (err && errno != EINVAL && errno != ENOENT)
 			FAIL_ERRNO("map_delete: expected EINVAL/ENOENT");
@@ -1485,13 +1443,13 @@ static const char *family_str(sa_family_t family)
 
 static const char *map_type_str(const struct bpf_map *map)
 {
-	int type;
+	const struct bpf_map_def *def;
 
-	if (!map)
+	def = bpf_map__def(map);
+	if (IS_ERR(def))
 		return "invalid";
-	type = bpf_map__type(map);
 
-	switch (type) {
+	switch (def->type) {
 	case BPF_MAP_TYPE_SOCKMAP:
 		return "sockmap";
 	case BPF_MAP_TYPE_SOCKHASH:
@@ -1517,8 +1475,7 @@ static void test_ops(struct test_sockmap_listen *skel, struct bpf_map *map,
 		     int family, int sotype)
 {
 	const struct op_test {
-		void (*fn)(struct test_sockmap_listen *skel,
-			   int family, int sotype, int mapfd);
+		void (*fn)(int family, int sotype, int mapfd);
 		const char *name;
 		int sotype;
 	} tests[] = {
@@ -1565,7 +1522,7 @@ static void test_ops(struct test_sockmap_listen *skel, struct bpf_map *map,
 		if (!test__start_subtest(s))
 			continue;
 
-		t->fn(skel, family, sotype, map_fd);
+		t->fn(family, sotype, map_fd);
 		test_ops_cleanup(map);
 	}
 }
@@ -2045,7 +2002,7 @@ static void run_tests(struct test_sockmap_listen *skel, struct bpf_map *map,
 	test_udp_unix_redir(skel, map, family);
 }
 
-void serial_test_sockmap_listen(void)
+void test_sockmap_listen(void)
 {
 	struct test_sockmap_listen *skel;
 

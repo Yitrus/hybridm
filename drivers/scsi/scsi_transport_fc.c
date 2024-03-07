@@ -34,7 +34,7 @@ static int fc_bsg_hostadd(struct Scsi_Host *, struct fc_host_attrs *);
 static int fc_bsg_rportadd(struct Scsi_Host *, struct fc_rport *);
 static void fc_bsg_remove(struct request_queue *);
 static void fc_bsg_goose_queue(struct fc_rport *);
-static void fc_li_stats_update(u16 event_type,
+static void fc_li_stats_update(struct fc_fn_li_desc *li_desc,
 			       struct fc_fpin_stats *stats);
 static void fc_delivery_stats_update(u32 reason_code,
 				     struct fc_fpin_stats *stats);
@@ -543,7 +543,7 @@ fc_host_post_fc_event(struct Scsi_Host *shost, u32 event_number,
 	struct nlmsghdr	*nlh;
 	struct fc_nl_event *event;
 	const char *name;
-	size_t len, padding;
+	u32 len;
 	int err;
 
 	if (!data_buf || data_len < 4)
@@ -554,7 +554,7 @@ fc_host_post_fc_event(struct Scsi_Host *shost, u32 event_number,
 		goto send_fail;
 	}
 
-	len = FC_NL_MSGALIGN(sizeof(*event) - sizeof(event->event_data) + data_len);
+	len = FC_NL_MSGALIGN(sizeof(*event) + data_len);
 
 	skb = nlmsg_new(len, GFP_KERNEL);
 	if (!skb) {
@@ -578,9 +578,7 @@ fc_host_post_fc_event(struct Scsi_Host *shost, u32 event_number,
 	event->event_num = event_number;
 	event->event_code = event_code;
 	if (data_len)
-		memcpy(event->event_data_flex, data_buf, data_len);
-	padding = len - offsetof(typeof(*event), event_data_flex) - data_len;
-	memset(event->event_data_flex + data_len, 0, padding);
+		memcpy(&event->event_data, data_buf, data_len);
 
 	nlmsg_multicast(scsi_nl_sock, skb, 0, SCSI_NL_GRP_FC_EVENTS,
 			GFP_KERNEL);
@@ -672,34 +670,42 @@ fc_find_rport_by_wwpn(struct Scsi_Host *shost, u64 wwpn)
 EXPORT_SYMBOL(fc_find_rport_by_wwpn);
 
 static void
-fc_li_stats_update(u16 event_type,
+fc_li_stats_update(struct fc_fn_li_desc *li_desc,
 		   struct fc_fpin_stats *stats)
 {
-	stats->li++;
-	switch (event_type) {
+	stats->li += be32_to_cpu(li_desc->event_count);
+	switch (be16_to_cpu(li_desc->event_type)) {
 	case FPIN_LI_UNKNOWN:
-		stats->li_failure_unknown++;
+		stats->li_failure_unknown +=
+		    be32_to_cpu(li_desc->event_count);
 		break;
 	case FPIN_LI_LINK_FAILURE:
-		stats->li_link_failure_count++;
+		stats->li_link_failure_count +=
+		    be32_to_cpu(li_desc->event_count);
 		break;
 	case FPIN_LI_LOSS_OF_SYNC:
-		stats->li_loss_of_sync_count++;
+		stats->li_loss_of_sync_count +=
+		    be32_to_cpu(li_desc->event_count);
 		break;
 	case FPIN_LI_LOSS_OF_SIG:
-		stats->li_loss_of_signals_count++;
+		stats->li_loss_of_signals_count +=
+		    be32_to_cpu(li_desc->event_count);
 		break;
 	case FPIN_LI_PRIM_SEQ_ERR:
-		stats->li_prim_seq_err_count++;
+		stats->li_prim_seq_err_count +=
+		    be32_to_cpu(li_desc->event_count);
 		break;
 	case FPIN_LI_INVALID_TX_WD:
-		stats->li_invalid_tx_word_count++;
+		stats->li_invalid_tx_word_count +=
+		    be32_to_cpu(li_desc->event_count);
 		break;
 	case FPIN_LI_INVALID_CRC:
-		stats->li_invalid_crc_count++;
+		stats->li_invalid_crc_count +=
+		    be32_to_cpu(li_desc->event_count);
 		break;
 	case FPIN_LI_DEVICE_SPEC:
-		stats->li_device_specific++;
+		stats->li_device_specific +=
+		    be32_to_cpu(li_desc->event_count);
 		break;
 	}
 }
@@ -761,7 +767,6 @@ fc_fpin_li_stats_update(struct Scsi_Host *shost, struct fc_tlv_desc *tlv)
 	struct fc_rport *attach_rport = NULL;
 	struct fc_host_attrs *fc_host = shost_to_fc_host(shost);
 	struct fc_fn_li_desc *li_desc = (struct fc_fn_li_desc *)tlv;
-	u16 event_type = be16_to_cpu(li_desc->event_type);
 	u64 wwpn;
 
 	rport = fc_find_rport_by_wwpn(shost,
@@ -770,7 +775,7 @@ fc_fpin_li_stats_update(struct Scsi_Host *shost, struct fc_tlv_desc *tlv)
 	    (rport->roles & FC_PORT_ROLE_FCP_TARGET ||
 	     rport->roles & FC_PORT_ROLE_NVME_TARGET)) {
 		attach_rport = rport;
-		fc_li_stats_update(event_type, &attach_rport->fpin_stats);
+		fc_li_stats_update(li_desc, &attach_rport->fpin_stats);
 	}
 
 	if (be32_to_cpu(li_desc->pname_count) > 0) {
@@ -784,14 +789,14 @@ fc_fpin_li_stats_update(struct Scsi_Host *shost, struct fc_tlv_desc *tlv)
 			    rport->roles & FC_PORT_ROLE_NVME_TARGET)) {
 				if (rport == attach_rport)
 					continue;
-				fc_li_stats_update(event_type,
+				fc_li_stats_update(li_desc,
 						   &rport->fpin_stats);
 			}
 		}
 	}
 
 	if (fc_host->port_name == be64_to_cpu(li_desc->attached_wwpn))
-		fc_li_stats_update(event_type, &fc_host->fpin_stats);
+		fc_li_stats_update(li_desc, &fc_host->fpin_stats);
 }
 
 /*
@@ -1172,7 +1177,7 @@ static int fc_rport_set_dev_loss_tmo(struct fc_rport *rport,
 	return 0;
 }
 
-fc_rport_show_function(dev_loss_tmo, "%u\n", 20, )
+fc_rport_show_function(dev_loss_tmo, "%d\n", 20, )
 static ssize_t
 store_fc_rport_dev_loss_tmo(struct device *dev, struct device_attribute *attr,
 			    const char *buf, size_t count)
@@ -2530,14 +2535,15 @@ static int fc_vport_match(struct attribute_container *cont,
  * Notes:
  *	This routine assumes no locks are held on entry.
  */
-enum scsi_timeout_action fc_eh_timed_out(struct scsi_cmnd *scmd)
+enum blk_eh_timer_return
+fc_eh_timed_out(struct scsi_cmnd *scmd)
 {
 	struct fc_rport *rport = starget_to_rport(scsi_target(scmd->device));
 
 	if (rport->port_state == FC_PORTSTATE_BLOCKED)
-		return SCSI_EH_RESET_TIMER;
+		return BLK_EH_RESET_TIMER;
 
-	return SCSI_EH_NOT_HANDLED;
+	return BLK_EH_DONE;
 }
 EXPORT_SYMBOL(fc_eh_timed_out);
 

@@ -75,16 +75,12 @@ static void pci_std_update_resource(struct pci_dev *dev, int resno)
 		 * as zero when disabled, so don't update ROM BARs unless
 		 * they're enabled.  See
 		 * https://lore.kernel.org/r/43147B3D.1030309@vc.cvut.cz/
-		 * But we must update ROM BAR for buggy devices where even a
-		 * disabled ROM can conflict with other BARs.
 		 */
-		if (!(res->flags & IORESOURCE_ROM_ENABLE) &&
-		    !dev->rom_bar_overlap)
+		if (!(res->flags & IORESOURCE_ROM_ENABLE))
 			return;
 
 		reg = dev->rom_base_reg;
-		if (res->flags & IORESOURCE_ROM_ENABLE)
-			new |= PCI_ROM_ADDRESS_ENABLE;
+		new |= PCI_ROM_ADDRESS_ENABLE;
 	} else
 		return;
 
@@ -214,17 +210,6 @@ static int pci_revert_fw_address(struct resource *res, struct pci_dev *dev,
 
 	root = pci_find_parent_resource(dev, res);
 	if (!root) {
-		/*
-		 * If dev is behind a bridge, accesses will only reach it
-		 * if res is inside the relevant bridge window.
-		 */
-		if (pci_upstream_bridge(dev))
-			return -ENXIO;
-
-		/*
-		 * On the root bus, assume the host bridge will forward
-		 * everything.
-		 */
 		if (res->flags & IORESOURCE_IO)
 			root = &ioport_resource;
 		else

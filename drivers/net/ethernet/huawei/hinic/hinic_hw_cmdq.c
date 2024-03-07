@@ -82,6 +82,11 @@
 						     struct hinic_func_to_io, \
 						     cmdqs)
 
+enum cmdq_wqe_type {
+	WQE_LCMD_TYPE = 0,
+	WQE_SCMD_TYPE = 1,
+};
+
 enum completion_format {
 	COMPLETE_DIRECT = 0,
 	COMPLETE_SGE    = 1,
@@ -504,8 +509,8 @@ int hinic_cmdq_direct_resp(struct hinic_cmdqs *cmdqs,
  *
  * Return 0 - Success, negative - Failure
  **/
-static int hinic_set_arm_bit(struct hinic_cmdqs *cmdqs,
-			     enum hinic_set_arm_qtype q_type, u32 q_id)
+int hinic_set_arm_bit(struct hinic_cmdqs *cmdqs,
+		      enum hinic_set_arm_qtype q_type, u32 q_id)
 {
 	struct hinic_cmdq *cmdq = &cmdqs->cmdq[HINIC_CMDQ_SYNC];
 	struct hinic_hwif *hwif = cmdqs->hwif;
@@ -791,10 +796,11 @@ static int init_cmdqs_ctxt(struct hinic_hwdev *hwdev,
 	struct hinic_cmdq_ctxt *cmdq_ctxts;
 	struct pci_dev *pdev = hwif->pdev;
 	struct hinic_pfhwdev *pfhwdev;
+	size_t cmdq_ctxts_size;
 	int err;
 
-	cmdq_ctxts = devm_kcalloc(&pdev->dev, HINIC_MAX_CMDQ_TYPES,
-				  sizeof(*cmdq_ctxts), GFP_KERNEL);
+	cmdq_ctxts_size = HINIC_MAX_CMDQ_TYPES * sizeof(*cmdq_ctxts);
+	cmdq_ctxts = devm_kzalloc(&pdev->dev, cmdq_ctxts_size, GFP_KERNEL);
 	if (!cmdq_ctxts)
 		return -ENOMEM;
 
@@ -878,6 +884,7 @@ int hinic_init_cmdqs(struct hinic_cmdqs *cmdqs, struct hinic_hwif *hwif,
 	struct hinic_func_to_io *func_to_io = cmdqs_to_func_to_io(cmdqs);
 	struct pci_dev *pdev = hwif->pdev;
 	struct hinic_hwdev *hwdev;
+	size_t saved_wqs_size;
 	u16 max_wqe_size;
 	int err;
 
@@ -888,8 +895,8 @@ int hinic_init_cmdqs(struct hinic_cmdqs *cmdqs, struct hinic_hwif *hwif,
 	if (!cmdqs->cmdq_buf_pool)
 		return -ENOMEM;
 
-	cmdqs->saved_wqs = devm_kcalloc(&pdev->dev, HINIC_MAX_CMDQ_TYPES,
-					sizeof(*cmdqs->saved_wqs), GFP_KERNEL);
+	saved_wqs_size = HINIC_MAX_CMDQ_TYPES * sizeof(struct hinic_wq);
+	cmdqs->saved_wqs = devm_kzalloc(&pdev->dev, saved_wqs_size, GFP_KERNEL);
 	if (!cmdqs->saved_wqs) {
 		err = -ENOMEM;
 		goto err_saved_wqs;
@@ -924,7 +931,7 @@ int hinic_init_cmdqs(struct hinic_cmdqs *cmdqs, struct hinic_hwif *hwif,
 
 err_set_cmdq_depth:
 	hinic_ceq_unregister_cb(&func_to_io->ceqs, HINIC_CEQ_CMDQ);
-	free_cmdq(&cmdqs->cmdq[HINIC_CMDQ_SYNC]);
+
 err_cmdq_ctxt:
 	hinic_wqs_cmdq_free(&cmdqs->cmdq_pages, cmdqs->saved_wqs,
 			    HINIC_MAX_CMDQ_TYPES);

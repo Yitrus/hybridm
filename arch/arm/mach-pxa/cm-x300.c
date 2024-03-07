@@ -40,8 +40,6 @@
 #include <linux/spi/spi_gpio.h>
 #include <linux/spi/tdo24m.h>
 
-#include <linux/soc/pxa/cpu.h>
-
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/setup.h>
@@ -53,7 +51,7 @@
 #include <linux/platform_data/mmc-pxamci.h>
 #include <linux/platform_data/usb-ohci-pxa27x.h>
 #include <linux/platform_data/mtd-nand-pxa3xx.h>
-#include <linux/platform_data/asoc-pxa.h>
+#include <mach/audio.h>
 #include <linux/platform_data/usb-pxa3xx-ulpi.h>
 
 #include <asm/mach/map.h>
@@ -356,13 +354,13 @@ static struct platform_device cm_x300_spi_gpio = {
 static struct gpiod_lookup_table cm_x300_spi_gpiod_table = {
 	.dev_id         = "spi_gpio",
 	.table          = {
-		GPIO_LOOKUP("pca9555.1", GPIO_LCD_SCL - GPIO_LCD_BASE,
+		GPIO_LOOKUP("gpio-pxa", GPIO_LCD_SCL,
 			    "sck", GPIO_ACTIVE_HIGH),
-		GPIO_LOOKUP("pca9555.1", GPIO_LCD_DIN - GPIO_LCD_BASE,
+		GPIO_LOOKUP("gpio-pxa", GPIO_LCD_DIN,
 			    "mosi", GPIO_ACTIVE_HIGH),
-		GPIO_LOOKUP("pca9555.1", GPIO_LCD_DOUT - GPIO_LCD_BASE,
+		GPIO_LOOKUP("gpio-pxa", GPIO_LCD_DOUT,
 			    "miso", GPIO_ACTIVE_HIGH),
-		GPIO_LOOKUP("pca9555.1", GPIO_LCD_CS - GPIO_LCD_BASE,
+		GPIO_LOOKUP("gpio-pxa", GPIO_LCD_CS,
 			    "cs", GPIO_ACTIVE_HIGH),
 		{ },
 	},

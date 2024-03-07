@@ -130,14 +130,6 @@ struct mipi_dbi_dev {
 	 * @dbi: MIPI DBI interface
 	 */
 	struct mipi_dbi dbi;
-
-	/**
-	 * @driver_private: Driver private data.
-	 *                  Necessary for drivers with private data since devm_drm_dev_alloc()
-	 *                  can't allocate structures that embed a structure which then again
-	 *                  embeds drm_device.
-	 */
-	void *driver_private;
 };
 
 static inline struct mipi_dbi_dev *drm_to_mipi_dbi_dev(struct drm_device *drm)
@@ -155,8 +147,6 @@ int mipi_dbi_dev_init_with_formats(struct mipi_dbi_dev *dbidev,
 int mipi_dbi_dev_init(struct mipi_dbi_dev *dbidev,
 		      const struct drm_simple_display_pipe_funcs *funcs,
 		      const struct drm_display_mode *mode, unsigned int rotation);
-enum drm_mode_status mipi_dbi_pipe_mode_valid(struct drm_simple_display_pipe *pipe,
-					      const struct drm_display_mode *mode);
 void mipi_dbi_pipe_update(struct drm_simple_display_pipe *pipe,
 			  struct drm_plane_state *old_state);
 void mipi_dbi_enable_flush(struct mipi_dbi_dev *dbidev,
@@ -204,7 +194,7 @@ int mipi_dbi_buf_copy(void *dst, struct drm_framebuffer *fb,
 #ifdef CONFIG_DEBUG_FS
 void mipi_dbi_debugfs_init(struct drm_minor *minor);
 #else
-static inline void mipi_dbi_debugfs_init(struct drm_minor *minor) {}
+#define mipi_dbi_debugfs_init		NULL
 #endif
 
 #endif /* __LINUX_MIPI_DBI_H */

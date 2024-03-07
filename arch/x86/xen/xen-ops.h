@@ -10,10 +10,10 @@
 /* These are code, but not functions.  Defined in entry.S */
 extern const char xen_failsafe_callback[];
 
-void xen_entry_SYSENTER_compat(void);
+void xen_sysenter_target(void);
 #ifdef CONFIG_X86_64
-void xen_entry_SYSCALL_64(void);
-void xen_entry_SYSCALL_compat(void);
+void xen_syscall_target(void);
+void xen_syscall32_target(void);
 #endif
 
 extern void *xen_initial_gdt;
@@ -76,7 +76,9 @@ irqreturn_t xen_debug_interrupt(int irq, void *dev_id);
 
 bool xen_vcpu_stolen(int vcpu);
 
-void xen_vcpu_setup(int cpu);
+extern int xen_have_vcpu_info_placement;
+
+int xen_vcpu_setup(int cpu);
 void xen_vcpu_info_reset(int cpu);
 void xen_setup_vcpu_info_placement(void);
 

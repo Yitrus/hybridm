@@ -116,11 +116,6 @@ static inline int page_order(struct perf_buffer *rb)
 }
 #endif
 
-static inline int data_page_nr(struct perf_buffer *rb)
-{
-	return rb->nr_pages << page_order(rb);
-}
-
 static inline unsigned long perf_data_size(struct perf_buffer *rb)
 {
 	return rb->nr_pages << (PAGE_SHIFT + page_order(rb));
@@ -210,7 +205,12 @@ DEFINE_OUTPUT_COPY(__output_copy_user, arch_perf_out_copy_user)
 
 static inline int get_recursion_context(int *recursion)
 {
-	unsigned char rctx = interrupt_context_level();
+	unsigned int pc = preempt_count();
+	unsigned char rctx = 0;
+
+	rctx += !!(pc & (NMI_MASK));
+	rctx += !!(pc & (NMI_MASK | HARDIRQ_MASK));
+	rctx += !!(pc & (NMI_MASK | HARDIRQ_MASK | SOFTIRQ_OFFSET));
 
 	if (recursion[rctx])
 		return -1;

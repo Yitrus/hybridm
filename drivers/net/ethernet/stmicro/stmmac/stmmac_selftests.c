@@ -36,7 +36,7 @@ struct stmmac_packet_attrs {
 	int vlan_id_in;
 	int vlan_id_out;
 	unsigned char *src;
-	const unsigned char *dst;
+	unsigned char *dst;
 	u32 ip_src;
 	u32 ip_dst;
 	int tcp;
@@ -249,8 +249,8 @@ static int stmmac_test_loopback_validate(struct sk_buff *skb,
 					 struct net_device *orig_ndev)
 {
 	struct stmmac_test_priv *tpriv = pt->af_packet_priv;
-	const unsigned char *dst = tpriv->packet->dst;
 	unsigned char *src = tpriv->packet->src;
+	unsigned char *dst = tpriv->packet->dst;
 	struct stmmachdr *shdr;
 	struct ethhdr *ehdr;
 	struct udphdr *uhdr;
@@ -795,8 +795,8 @@ static int stmmac_test_flowctrl(struct stmmac_priv *priv)
 		struct stmmac_channel *ch = &priv->channel[i];
 		u32 tail;
 
-		tail = priv->dma_conf.rx_queue[i].dma_rx_phy +
-			(priv->dma_conf.dma_rx_size * sizeof(struct dma_desc));
+		tail = priv->rx_queue[i].dma_rx_phy +
+			(priv->dma_rx_size * sizeof(struct dma_desc));
 
 		stmmac_set_rx_tail_ptr(priv, priv->ioaddr, tail, i);
 		stmmac_start_rx(priv, priv->ioaddr, i);
@@ -1084,9 +1084,8 @@ static int stmmac_test_rxp(struct stmmac_priv *priv)
 	unsigned char addr[ETH_ALEN] = {0xde, 0xad, 0xbe, 0xef, 0x00, 0x00};
 	struct tc_cls_u32_offload cls_u32 = { };
 	struct stmmac_packet_attrs attr = { };
-	struct tc_action **actions;
+	struct tc_action **actions, *act;
 	struct tc_u32_sel *sel;
-	struct tcf_gact *gact;
 	struct tcf_exts *exts;
 	int ret, i, nk = 1;
 
@@ -1105,14 +1104,14 @@ static int stmmac_test_rxp(struct stmmac_priv *priv)
 		goto cleanup_sel;
 	}
 
-	actions = kcalloc(nk, sizeof(*actions), GFP_KERNEL);
+	actions = kzalloc(nk * sizeof(*actions), GFP_KERNEL);
 	if (!actions) {
 		ret = -ENOMEM;
 		goto cleanup_exts;
 	}
 
-	gact = kcalloc(nk, sizeof(*gact), GFP_KERNEL);
-	if (!gact) {
+	act = kzalloc(nk * sizeof(*act), GFP_KERNEL);
+	if (!act) {
 		ret = -ENOMEM;
 		goto cleanup_actions;
 	}
@@ -1127,7 +1126,9 @@ static int stmmac_test_rxp(struct stmmac_priv *priv)
 	exts->nr_actions = nk;
 	exts->actions = actions;
 	for (i = 0; i < nk; i++) {
-		actions[i] = (struct tc_action *)&gact[i];
+		struct tcf_gact *gact = to_gact(&act[i]);
+
+		actions[i] = &act[i];
 		gact->tcf_action = TC_ACT_SHOT;
 	}
 
@@ -1151,7 +1152,7 @@ static int stmmac_test_rxp(struct stmmac_priv *priv)
 	stmmac_tc_setup_cls_u32(priv, priv, &cls_u32);
 
 cleanup_act:
-	kfree(gact);
+	kfree(act);
 cleanup_actions:
 	kfree(actions);
 cleanup_exts:
@@ -1654,16 +1655,12 @@ static int stmmac_test_arpoffload(struct stmmac_priv *priv)
 	}
 
 	ret = stmmac_set_arp_offload(priv, priv->hw, true, ip_addr);
-	if (ret) {
-		kfree_skb(skb);
+	if (ret)
 		goto cleanup;
-	}
 
 	ret = dev_set_promiscuity(priv->dev, 1);
-	if (ret) {
-		kfree_skb(skb);
+	if (ret)
 		goto cleanup;
-	}
 
 	ret = dev_direct_xmit(skb, 0);
 	if (ret)
@@ -1684,7 +1681,7 @@ cleanup:
 static int __stmmac_test_jumbo(struct stmmac_priv *priv, u16 queue)
 {
 	struct stmmac_packet_attrs attr = { };
-	int size = priv->dma_conf.dma_buf_sz;
+	int size = priv->dma_buf_sz;
 
 	attr.dst = priv->dev->dev_addr;
 	attr.max_size = size - ETH_FCS_LEN;
@@ -1767,7 +1764,7 @@ static int stmmac_test_tbs(struct stmmac_priv *priv)
 
 	/* Find first TBS enabled Queue, if any */
 	for (i = 0; i < priv->plat->tx_queues_to_use; i++)
-		if (priv->dma_conf.tx_queue[i].tbs & STMMAC_TBS_AVAIL)
+		if (priv->tx_queue[i].tbs & STMMAC_TBS_AVAIL)
 			break;
 
 	if (i >= priv->plat->tx_queues_to_use)
@@ -1780,9 +1777,9 @@ static int stmmac_test_tbs(struct stmmac_priv *priv)
 	if (ret)
 		return ret;
 
-	read_lock_irqsave(&priv->ptp_lock, flags);
+	spin_lock_irqsave(&priv->ptp_lock, flags);
 	stmmac_get_systime(priv, priv->ptpaddr, &curr_time);
-	read_unlock_irqrestore(&priv->ptp_lock, flags);
+	spin_unlock_irqrestore(&priv->ptp_lock, flags);
 
 	if (!curr_time) {
 		ret = -EOPNOTSUPP;
@@ -1802,9 +1799,9 @@ static int stmmac_test_tbs(struct stmmac_priv *priv)
 		goto fail_disable;
 
 	/* Check if expected time has elapsed */
-	read_lock_irqsave(&priv->ptp_lock, flags);
+	spin_lock_irqsave(&priv->ptp_lock, flags);
 	stmmac_get_systime(priv, priv->ptpaddr, &curr_time);
-	read_unlock_irqrestore(&priv->ptp_lock, flags);
+	spin_unlock_irqrestore(&priv->ptp_lock, flags);
 
 	if ((curr_time - start_time) < STMMAC_TBS_LT_OFFSET)
 		ret = -EINVAL;

@@ -135,10 +135,10 @@ nvkm_cstate_find_best(struct nvkm_clk *clk, struct nvkm_pstate *pstate,
 
 	list_for_each_entry_from_reverse(cstate, &pstate->list, head) {
 		if (nvkm_cstate_valid(clk, cstate, max_volt, clk->temp))
-			return cstate;
+			break;
 	}
 
-	return NULL;
+	return cstate;
 }
 
 static struct nvkm_cstate *
@@ -169,8 +169,6 @@ nvkm_cstate_prog(struct nvkm_clk *clk, struct nvkm_pstate *pstate, int cstatei)
 	if (!list_empty(&pstate->list)) {
 		cstate = nvkm_cstate_get(clk, pstate, cstatei);
 		cstate = nvkm_cstate_find_best(clk, pstate, cstate);
-		if (!cstate)
-			return -EINVAL;
 	} else {
 		cstate = &pstate->base;
 	}
@@ -330,6 +328,7 @@ nvkm_pstate_work(struct work_struct *work)
 	}
 
 	wake_up_all(&clk->wait);
+	nvkm_notify_get(&clk->pwrsrc_ntfy);
 }
 
 static int
@@ -558,12 +557,13 @@ nvkm_clk_dstate(struct nvkm_clk *clk, int req, int rel)
 	return nvkm_pstate_calc(clk, true);
 }
 
-int
-nvkm_clk_pwrsrc(struct nvkm_device *device)
+static int
+nvkm_clk_pwrsrc(struct nvkm_notify *notify)
 {
-	if (device->clk)
-		return nvkm_pstate_calc(device->clk, false);
-	return 0;
+	struct nvkm_clk *clk =
+		container_of(notify, typeof(*clk), pwrsrc_ntfy);
+	nvkm_pstate_calc(clk, false);
+	return NVKM_NOTIFY_DROP;
 }
 
 /******************************************************************************
@@ -580,6 +580,7 @@ static int
 nvkm_clk_fini(struct nvkm_subdev *subdev, bool suspend)
 {
 	struct nvkm_clk *clk = nvkm_clk(subdev);
+	nvkm_notify_put(&clk->pwrsrc_ntfy);
 	flush_work(&clk->work);
 	if (clk->func->fini)
 		clk->func->fini(clk);
@@ -625,6 +626,8 @@ nvkm_clk_dtor(struct nvkm_subdev *subdev)
 {
 	struct nvkm_clk *clk = nvkm_clk(subdev);
 	struct nvkm_pstate *pstate, *temp;
+
+	nvkm_notify_fini(&clk->pwrsrc_ntfy);
 
 	/* Early return if the pstates have been provided statically */
 	if (clk->func->pstates)
@@ -686,6 +689,11 @@ nvkm_clk_ctor(const struct nvkm_clk_func *func, struct nvkm_device *device,
 			list_add_tail(&func->pstates[idx].head, &clk->states);
 		clk->state_nr = func->nr_pstates;
 	}
+
+	ret = nvkm_notify_init(NULL, &device->event, nvkm_clk_pwrsrc, true,
+			       NULL, 0, 0, &clk->pwrsrc_ntfy);
+	if (ret)
+		return ret;
 
 	mode = nvkm_stropt(device->cfgopt, "NvClkMode", &arglen);
 	if (mode) {

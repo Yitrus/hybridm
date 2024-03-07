@@ -270,13 +270,6 @@ static ssize_t host_features_show(struct device *dev,
 static DEVICE_ATTR_RO(host_version);
 static DEVICE_ATTR_RO(host_features);
 
-static struct attribute *vbg_pci_attrs[] = {
-	&dev_attr_host_version.attr,
-	&dev_attr_host_features.attr,
-	NULL,
-};
-ATTRIBUTE_GROUPS(vbg_pci);
-
 /**
  * Does the PCI detection and init of the device.
  *
@@ -363,8 +356,8 @@ static int vbg_pci_probe(struct pci_dev *pci, const struct pci_device_id *id)
 		goto err_vbg_core_exit;
 	}
 
-	ret = request_irq(pci->irq, vbg_core_isr, IRQF_SHARED, DEVICE_NAME,
-			  gdev);
+	ret = devm_request_irq(dev, pci->irq, vbg_core_isr, IRQF_SHARED,
+			       DEVICE_NAME, gdev);
 	if (ret) {
 		vbg_err("vboxguest: Error requesting irq: %d\n", ret);
 		goto err_vbg_core_exit;
@@ -374,7 +367,7 @@ static int vbg_pci_probe(struct pci_dev *pci, const struct pci_device_id *id)
 	if (ret) {
 		vbg_err("vboxguest: Error misc_register %s failed: %d\n",
 			DEVICE_NAME, ret);
-		goto err_free_irq;
+		goto err_vbg_core_exit;
 	}
 
 	ret = misc_register(&gdev->misc_device_user);
@@ -397,6 +390,12 @@ static int vbg_pci_probe(struct pci_dev *pci, const struct pci_device_id *id)
 	}
 
 	pci_set_drvdata(pci, gdev);
+	device_create_file(dev, &dev_attr_host_version);
+	device_create_file(dev, &dev_attr_host_features);
+
+	vbg_info("vboxguest: misc device minor %d, IRQ %d, I/O port %x, MMIO at %pap (size %pap)\n",
+		 gdev->misc_device.minor, pci->irq, gdev->io_port,
+		 &mmio, &mmio_len);
 
 	return 0;
 
@@ -404,8 +403,6 @@ err_unregister_misc_device_user:
 	misc_deregister(&gdev->misc_device_user);
 err_unregister_misc_device:
 	misc_deregister(&gdev->misc_device);
-err_free_irq:
-	free_irq(pci->irq, gdev);
 err_vbg_core_exit:
 	vbg_core_exit(gdev);
 err_disable_pcidev:
@@ -422,7 +419,8 @@ static void vbg_pci_remove(struct pci_dev *pci)
 	vbg_gdev = NULL;
 	mutex_unlock(&vbg_gdev_mutex);
 
-	free_irq(pci->irq, gdev);
+	device_remove_file(gdev->dev, &dev_attr_host_features);
+	device_remove_file(gdev->dev, &dev_attr_host_version);
 	misc_deregister(&gdev->misc_device_user);
 	misc_deregister(&gdev->misc_device);
 	vbg_core_exit(gdev);
@@ -487,7 +485,6 @@ MODULE_DEVICE_TABLE(pci,  vbg_pci_ids);
 
 static struct pci_driver vbg_pci_driver = {
 	.name		= DEVICE_NAME,
-	.dev_groups	= vbg_pci_groups,
 	.id_table	= vbg_pci_ids,
 	.probe		= vbg_pci_probe,
 	.remove		= vbg_pci_remove,

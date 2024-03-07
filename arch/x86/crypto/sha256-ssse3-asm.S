@@ -47,7 +47,6 @@
 ########################################################################
 
 #include <linux/linkage.h>
-#include <linux/cfi_types.h>
 
 ## assume buffers not aligned
 #define    MOVDQ movdqu
@@ -356,7 +355,8 @@ a = TMP_
 ## arg 3 : Num blocks
 ########################################################################
 .text
-SYM_TYPED_FUNC_START(sha256_transform_ssse3)
+SYM_FUNC_START(sha256_transform_ssse3)
+.align 32
 	pushq   %rbx
 	pushq   %r12
 	pushq   %r13
@@ -472,7 +472,7 @@ done_hash:
 	popq    %r12
 	popq    %rbx
 
-	RET
+	ret
 SYM_FUNC_END(sha256_transform_ssse3)
 
 .section	.rodata.cst256.K256, "aM", @progbits, 256

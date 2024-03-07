@@ -226,10 +226,12 @@ static struct sctp_association *sctp_association_init(
 	/* Create an output queue.  */
 	sctp_outq_init(asoc, &asoc->outqueue);
 
-	sctp_ulpq_init(&asoc->ulpq, asoc);
+	if (!sctp_ulpq_init(&asoc->ulpq, asoc))
+		goto fail_init;
 
-	if (sctp_stream_init(&asoc->stream, asoc->c.sinit_num_ostreams, 0, gfp))
-		goto stream_free;
+	if (sctp_stream_init(&asoc->stream, asoc->c.sinit_num_ostreams,
+			     0, gfp))
+		goto fail_init;
 
 	/* Initialize default path MTU. */
 	asoc->pathmtu = sp->pathmtu;
@@ -276,6 +278,7 @@ static struct sctp_association *sctp_association_init(
 
 stream_free:
 	sctp_stream_free(&asoc->stream);
+fail_init:
 	sock_put(asoc->base.sk);
 	sctp_endpoint_put(asoc->ep);
 	return NULL;

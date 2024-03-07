@@ -12,7 +12,7 @@ static void default_power_off(void)
 		wait_for_interrupt();
 }
 
-void (*pm_power_off)(void) = NULL;
+void (*pm_power_off)(void) = default_power_off;
 EXPORT_SYMBOL(pm_power_off);
 
 void machine_restart(char *cmd)
@@ -23,12 +23,10 @@ void machine_restart(char *cmd)
 
 void machine_halt(void)
 {
-	do_kernel_power_off();
-	default_power_off();
+	pm_power_off();
 }
 
 void machine_power_off(void)
 {
-	do_kernel_power_off();
-	default_power_off();
+	pm_power_off();
 }

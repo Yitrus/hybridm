@@ -8,6 +8,7 @@
 
 #include <linux/sched.h>
 #include <linux/mmzone.h>
+#include <linux/dax.h>
 #include <linux/slab.h>
 #include <linux/rbtree.h>
 #include <linux/spinlock.h>
@@ -46,7 +47,6 @@ struct mempolicy {
 	unsigned short mode; 	/* See MPOL_* above */
 	unsigned short flags;	/* See set_mempolicy() MPOL_F_* above */
 	nodemask_t nodes;	/* interleave/bind/perfer */
-	int home_node;		/* Home node to use for MPOL_BIND and MPOL_PREFERRED_MANY */
 
 	union {
 		nodemask_t cpuset_mems_allowed;	/* relative to these nodes */
@@ -151,6 +151,13 @@ extern bool mempolicy_in_oom_domain(struct task_struct *tsk,
 				const nodemask_t *mask);
 extern nodemask_t *policy_nodemask(gfp_t gfp, struct mempolicy *policy);
 
+static inline nodemask_t *policy_nodemask_current(gfp_t gfp)
+{
+	struct mempolicy *mpol = get_task_policy(current);
+
+	return policy_nodemask(gfp, mpol);
+}
+
 extern unsigned int mempolicy_slab_node(void);
 
 extern enum zone_type policy_zone;
@@ -177,12 +184,33 @@ extern bool vma_migratable(struct vm_area_struct *vma);
 extern int mpol_misplaced(struct page *, struct vm_area_struct *, unsigned long);
 extern void mpol_put_task_policy(struct task_struct *);
 
+extern bool numa_demotion_enabled;
+#ifdef CONFIG_HTMM
+extern unsigned int htmm_sample_period;
+extern unsigned int htmm_inst_sample_period;
+extern unsigned int htmm_split_period;
+extern unsigned int htmm_thres_hot;
+extern unsigned int htmm_cooling_period;
+extern unsigned int htmm_adaptation_period;
+extern unsigned int ksampled_min_sample_ratio;
+extern unsigned int ksampled_max_sample_ratio;
+extern unsigned int htmm_demotion_period_in_ms;
+extern unsigned int htmm_promotion_period_in_ms;
+extern unsigned int htmm_thres_split;
+extern unsigned int htmm_nowarm;
+extern unsigned int htmm_util_weight;
+extern unsigned int htmm_gamma;
+extern unsigned int htmm_mode;
+extern bool htmm_cxl_mode;
+extern bool htmm_skip_cooling;
+extern unsigned int htmm_thres_cooling_alloc;
+extern unsigned int ksampled_soft_cpu_quota;
+#endif
 static inline bool mpol_is_preferred_many(struct mempolicy *pol)
 {
 	return  (pol->mode == MPOL_PREFERRED_MANY);
 }
 
-extern bool apply_policy_zone(struct mempolicy *policy, enum zone_type zone);
 
 #else
 
@@ -287,6 +315,13 @@ static inline int mpol_misplaced(struct page *page, struct vm_area_struct *vma,
 static inline void mpol_put_task_policy(struct task_struct *task)
 {
 }
+
+static inline nodemask_t *policy_nodemask_current(gfp_t gfp)
+{
+	return NULL;
+}
+
+#define numa_demotion_enabled	false
 
 static inline bool mpol_is_preferred_many(struct mempolicy *pol)
 {

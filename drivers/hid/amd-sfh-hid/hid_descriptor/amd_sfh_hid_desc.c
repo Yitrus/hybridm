@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  AMD SFH Report Descriptor generator
- *  Copyright 2020-2021 Advanced Micro Devices, Inc.
+ *  Copyright 2020 Advanced Micro Devices, Inc.
  *  Authors: Nehal Bakulchandra Shah <Nehal-Bakulchandra.Shah@amd.com>
  *	     Sandeep Singh <sandeep.singh@amd.com>
- *	     Basavaraj Natikar <Basavaraj.Natikar@amd.com>
  */
 
 #include <linux/kernel.h>
@@ -27,9 +26,8 @@
 #define HID_USAGE_SENSOR_STATE_READY_ENUM                             0x02
 #define HID_USAGE_SENSOR_STATE_INITIALIZING_ENUM                      0x05
 #define HID_USAGE_SENSOR_EVENT_DATA_UPDATED_ENUM                      0x04
-#define ILLUMINANCE_MASK					GENMASK(14, 0)
 
-static int get_report_descriptor(int sensor_idx, u8 *rep_desc)
+int get_report_descriptor(int sensor_idx, u8 *rep_desc)
 {
 	switch (sensor_idx) {
 	case accel_idx: /* accel */
@@ -63,7 +61,7 @@ static int get_report_descriptor(int sensor_idx, u8 *rep_desc)
 	return 0;
 }
 
-static u32 get_descr_sz(int sensor_idx, int descriptor_name)
+u32 get_descr_sz(int sensor_idx, int descriptor_name)
 {
 	switch (sensor_idx) {
 	case accel_idx:
@@ -133,7 +131,7 @@ static void get_common_features(struct common_feature_property *common, int repo
 	common->report_interval =  HID_DEFAULT_REPORT_INTERVAL;
 }
 
-static u8 get_feature_report(int sensor_idx, int report_id, u8 *feature_report)
+u8 get_feature_report(int sensor_idx, int report_id, u8 *feature_report)
 {
 	struct accel3_feature_report acc_feature;
 	struct gyro_feature_report gyro_feature;
@@ -200,8 +198,7 @@ static void get_common_inputs(struct common_input_property *common, int report_i
 	common->event_type = HID_USAGE_SENSOR_EVENT_DATA_UPDATED_ENUM;
 }
 
-static u8 get_input_report(u8 current_index, int sensor_idx, int report_id,
-			   struct amd_input_data *in_data)
+u8 get_input_report(u8 current_index, int sensor_idx, int report_id, struct amd_input_data *in_data)
 {
 	struct amd_mp2_dev *privdata = container_of(in_data, struct amd_mp2_dev, in_data);
 	u32 *sensor_virt_addr = in_data->sensor_virt_addr[current_index];
@@ -248,8 +245,7 @@ static u8 get_input_report(u8 current_index, int sensor_idx, int report_id,
 		get_common_inputs(&als_input.common_property, report_id);
 		/* For ALS ,V2 Platforms uses C2P_MSG5 register instead of DRAM access method */
 		if (supported_input == V2_STATUS)
-			als_input.illuminance_value =
-				readl(privdata->mmio + AMD_C2P_MSG(5)) & ILLUMINANCE_MASK;
+			als_input.illuminance_value = (int)readl(privdata->mmio + AMD_C2P_MSG(5));
 		else
 			als_input.illuminance_value =
 				(int)sensor_virt_addr[0] / AMD_SFH_FW_MULTIPLIER;
@@ -267,12 +263,4 @@ static u8 get_input_report(u8 current_index, int sensor_idx, int report_id,
 		break;
 	}
 	return report_size;
-}
-
-void amd_sfh_set_desc_ops(struct amd_mp2_ops *mp2_ops)
-{
-	mp2_ops->get_rep_desc = get_report_descriptor;
-	mp2_ops->get_feat_rep = get_feature_report;
-	mp2_ops->get_in_rep = get_input_report;
-	mp2_ops->get_desc_sz = get_descr_sz;
 }

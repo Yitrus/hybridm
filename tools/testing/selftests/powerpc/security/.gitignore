@@ -2,4 +2,3 @@
 rfi_flush
 entry_flush
 spectre_v2
-uaccess_flush

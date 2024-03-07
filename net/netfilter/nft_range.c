@@ -51,14 +51,7 @@ static int nft_range_init(const struct nft_ctx *ctx, const struct nft_expr *expr
 			const struct nlattr * const tb[])
 {
 	struct nft_range_expr *priv = nft_expr_priv(expr);
-	struct nft_data_desc desc_from = {
-		.type	= NFT_DATA_VALUE,
-		.size	= sizeof(priv->data_from),
-	};
-	struct nft_data_desc desc_to = {
-		.type	= NFT_DATA_VALUE,
-		.size	= sizeof(priv->data_to),
-	};
+	struct nft_data_desc desc_from, desc_to;
 	int err;
 	u32 op;
 
@@ -68,15 +61,25 @@ static int nft_range_init(const struct nft_ctx *ctx, const struct nft_expr *expr
 	    !tb[NFTA_RANGE_TO_DATA])
 		return -EINVAL;
 
-	err = nft_data_init(NULL, &priv->data_from, &desc_from,
-			    tb[NFTA_RANGE_FROM_DATA]);
+	err = nft_data_init(NULL, &priv->data_from, sizeof(priv->data_from),
+			    &desc_from, tb[NFTA_RANGE_FROM_DATA]);
 	if (err < 0)
 		return err;
 
-	err = nft_data_init(NULL, &priv->data_to, &desc_to,
-			    tb[NFTA_RANGE_TO_DATA]);
+	if (desc_from.type != NFT_DATA_VALUE) {
+		err = -EINVAL;
+		goto err1;
+	}
+
+	err = nft_data_init(NULL, &priv->data_to, sizeof(priv->data_to),
+			    &desc_to, tb[NFTA_RANGE_TO_DATA]);
 	if (err < 0)
 		goto err1;
+
+	if (desc_to.type != NFT_DATA_VALUE) {
+		err = -EINVAL;
+		goto err2;
+	}
 
 	if (desc_from.len != desc_to.len) {
 		err = -EINVAL;
@@ -111,8 +114,7 @@ err1:
 	return err;
 }
 
-static int nft_range_dump(struct sk_buff *skb,
-			  const struct nft_expr *expr, bool reset)
+static int nft_range_dump(struct sk_buff *skb, const struct nft_expr *expr)
 {
 	const struct nft_range_expr *priv = nft_expr_priv(expr);
 
@@ -138,7 +140,6 @@ static const struct nft_expr_ops nft_range_ops = {
 	.eval		= nft_range_eval,
 	.init		= nft_range_init,
 	.dump		= nft_range_dump,
-	.reduce		= NFT_REDUCE_READONLY,
 };
 
 struct nft_expr_type nft_range_type __read_mostly = {

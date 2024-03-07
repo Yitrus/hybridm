@@ -1,8 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Generic infrastructure for lifetime debugging of objects.
  *
+ * Started by Thomas Gleixner
+ *
  * Copyright (C) 2008, Thomas Gleixner <tglx@linutronix.de>
+ *
+ * For licencing details see kernel-base/COPYING
  */
 
 #define pr_fmt(fmt) "ODEBUG: " fmt
@@ -437,7 +440,6 @@ static int object_cpu_offline(unsigned int cpu)
 	struct debug_percpu_free *percpu_pool;
 	struct hlist_node *tmp;
 	struct debug_obj *obj;
-	unsigned long flags;
 
 	/* Remote access is safe as the CPU is dead already */
 	percpu_pool = per_cpu_ptr(&percpu_obj_pool, cpu);
@@ -445,12 +447,6 @@ static int object_cpu_offline(unsigned int cpu)
 		hlist_del(&obj->node);
 		kmem_cache_free(obj_cache, obj);
 	}
-
-	raw_spin_lock_irqsave(&pool_lock, flags);
-	obj_pool_used -= percpu_pool->obj_free;
-	debug_objects_freed += percpu_pool->obj_free;
-	raw_spin_unlock_irqrestore(&pool_lock, flags);
-
 	percpu_pool->obj_free = 0;
 
 	return 0;
@@ -507,9 +503,9 @@ static void debug_print_object(struct debug_obj *obj, char *msg)
 			descr->debug_hint(obj->object) : NULL;
 		limit++;
 		WARN(1, KERN_ERR "ODEBUG: %s %s (active state %u) "
-				 "object: %p object type: %s hint: %pS\n",
+				 "object type: %s hint: %pS\n",
 			msg, obj_states[obj->state], obj->astate,
-			obj->object, descr->name, hint);
+			descr->name, hint);
 	}
 	debug_objects_warnings++;
 }
@@ -1325,8 +1321,6 @@ static int __init debug_objects_replace_static_objects(void)
 		hlist_add_head(&obj->node, &objects);
 	}
 
-	debug_objects_allocated += i;
-
 	/*
 	 * debug_objects_mem_init() is now called early that only one CPU is up
 	 * and interrupts have been disabled, so it is safe to replace the
@@ -1395,7 +1389,6 @@ void __init debug_objects_mem_init(void)
 		debug_objects_enabled = 0;
 		kmem_cache_destroy(obj_cache);
 		pr_warn("out of memory.\n");
-		return;
 	} else
 		debug_objects_selftest();
 

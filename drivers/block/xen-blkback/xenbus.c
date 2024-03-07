@@ -10,7 +10,6 @@
 
 #include <linux/module.h>
 #include <linux/kthread.h>
-#include <linux/pagemap.h>
 #include <xen/events.h>
 #include <xen/grant_table.h>
 #include "common.h"
@@ -99,7 +98,7 @@ static void xen_update_blkif_status(struct xen_blkif *blkif)
 		return;
 	}
 
-	err = sync_blockdev(blkif->vbd.bdev);
+	err = filemap_write_and_wait(blkif->vbd.bdev->bd_inode->i_mapping);
 	if (err) {
 		xenbus_dev_error(blkif->be->dev, err, "block flush");
 		return;
@@ -156,11 +155,6 @@ static int xen_blkif_alloc_rings(struct xen_blkif *blkif)
 
 	return 0;
 }
-
-/* Enable the persistent grants feature. */
-static bool feature_persistent = true;
-module_param(feature_persistent, bool, 0644);
-MODULE_PARM_DESC(feature_persistent, "Enables the persistent grants feature");
 
 static struct xen_blkif *xen_blkif_alloc(domid_t domid)
 {
@@ -477,12 +471,19 @@ static void xen_vbd_free(struct xen_vbd *vbd)
 	vbd->bdev = NULL;
 }
 
+/* Enable the persistent grants feature. */
+static bool feature_persistent = true;
+module_param(feature_persistent, bool, 0644);
+MODULE_PARM_DESC(feature_persistent,
+		"Enables the persistent grants feature");
+
 static int xen_vbd_create(struct xen_blkif *blkif, blkif_vdev_t handle,
 			  unsigned major, unsigned minor, int readonly,
 			  int cdrom)
 {
 	struct xen_vbd *vbd;
 	struct block_device *bdev;
+	struct request_queue *q;
 
 	vbd = &blkif->vbd;
 	vbd->handle   = handle;
@@ -509,22 +510,26 @@ static int xen_vbd_create(struct xen_blkif *blkif, blkif_vdev_t handle,
 	}
 	vbd->size = vbd_sz(vbd);
 
-	if (cdrom || disk_to_cdi(vbd->bdev->bd_disk))
+	if (vbd->bdev->bd_disk->flags & GENHD_FL_CD || cdrom)
 		vbd->type |= VDISK_CDROM;
 	if (vbd->bdev->bd_disk->flags & GENHD_FL_REMOVABLE)
 		vbd->type |= VDISK_REMOVABLE;
 
-	if (bdev_write_cache(bdev))
+	q = bdev_get_queue(bdev);
+	if (q && test_bit(QUEUE_FLAG_WC, &q->queue_flags))
 		vbd->flush_support = true;
-	if (bdev_max_secure_erase_sectors(bdev))
+
+	if (q && blk_queue_secure_erase(q))
 		vbd->discard_secure = true;
+
+	vbd->feature_gnt_persistent = feature_persistent;
 
 	pr_debug("Successful creation of handle=%04x (dom=%u)\n",
 		handle, blkif->domid);
 	return 0;
 }
 
-static void xen_blkbk_remove(struct xenbus_device *dev)
+static int xen_blkbk_remove(struct xenbus_device *dev)
 {
 	struct backend_info *be = dev_get_drvdata(&dev->dev);
 
@@ -547,6 +552,8 @@ static void xen_blkbk_remove(struct xenbus_device *dev)
 		/* Put the reference we set in xen_blkif_alloc(). */
 		xen_blkif_put(be->blkif);
 	}
+
+	return 0;
 }
 
 int xen_blkbk_flush_diskcache(struct xenbus_transaction xbt,
@@ -570,21 +577,22 @@ static void xen_blkbk_discard(struct xenbus_transaction xbt, struct backend_info
 	int err;
 	int state = 0;
 	struct block_device *bdev = be->blkif->vbd.bdev;
+	struct request_queue *q = bdev_get_queue(bdev);
 
 	if (!xenbus_read_unsigned(dev->nodename, "discard-enable", 1))
 		return;
 
-	if (bdev_max_discard_sectors(bdev)) {
+	if (blk_queue_discard(q)) {
 		err = xenbus_printf(xbt, dev->nodename,
 			"discard-granularity", "%u",
-			bdev_discard_granularity(bdev));
+			q->limits.discard_granularity);
 		if (err) {
 			dev_warn(&dev->dev, "writing discard-granularity (%d)", err);
 			return;
 		}
 		err = xenbus_printf(xbt, dev->nodename,
 			"discard-alignment", "%u",
-			bdev_discard_alignment(bdev));
+			q->limits.discard_alignment);
 		if (err) {
 			dev_warn(&dev->dev, "writing discard-alignment (%d)", err);
 			return;
@@ -905,7 +913,7 @@ again:
 	xen_blkbk_barrier(xbt, be, be->blkif->vbd.flush_support);
 
 	err = xenbus_printf(xbt, dev->nodename, "feature-persistent", "%u",
-			be->blkif->vbd.feature_gnt_persistent_parm);
+			be->blkif->vbd.feature_gnt_persistent);
 	if (err) {
 		xenbus_dev_fatal(dev, err, "writing %s/feature-persistent",
 				 dev->nodename);
@@ -1082,11 +1090,10 @@ static int connect_ring(struct backend_info *be)
 		xenbus_dev_fatal(dev, err, "unknown fe protocol %s", protocol);
 		return -ENOSYS;
 	}
-
-	blkif->vbd.feature_gnt_persistent_parm = feature_persistent;
-	blkif->vbd.feature_gnt_persistent =
-		blkif->vbd.feature_gnt_persistent_parm &&
-		xenbus_read_unsigned(dev->otherend, "feature-persistent", 0);
+	if (blkif->vbd.feature_gnt_persistent)
+		blkif->vbd.feature_gnt_persistent =
+			xenbus_read_unsigned(dev->otherend,
+					"feature-persistent", 0);
 
 	blkif->vbd.overflow_max_grants = 0;
 

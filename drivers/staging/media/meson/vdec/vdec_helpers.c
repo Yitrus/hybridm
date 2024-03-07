@@ -227,16 +227,13 @@ int amvdec_set_canvases(struct amvdec_session *sess,
 }
 EXPORT_SYMBOL_GPL(amvdec_set_canvases);
 
-int amvdec_add_ts(struct amvdec_session *sess, u64 ts,
-		  struct v4l2_timecode tc, u32 offset, u32 vbuf_flags)
+void amvdec_add_ts(struct amvdec_session *sess, u64 ts,
+		   struct v4l2_timecode tc, u32 offset, u32 vbuf_flags)
 {
 	struct amvdec_timestamp *new_ts;
 	unsigned long flags;
 
 	new_ts = kzalloc(sizeof(*new_ts), GFP_KERNEL);
-	if (!new_ts)
-		return -ENOMEM;
-
 	new_ts->ts = ts;
 	new_ts->tc = tc;
 	new_ts->offset = offset;
@@ -245,7 +242,6 @@ int amvdec_add_ts(struct amvdec_session *sess, u64 ts,
 	spin_lock_irqsave(&sess->ts_spinlock, flags);
 	list_add_tail(&new_ts->list, &sess->timestamps);
 	spin_unlock_irqrestore(&sess->ts_spinlock, flags);
-	return 0;
 }
 EXPORT_SYMBOL_GPL(amvdec_add_ts);
 
@@ -280,13 +276,13 @@ static void dst_buf_done(struct amvdec_session *sess,
 
 	switch (sess->pixfmt_cap) {
 	case V4L2_PIX_FMT_NV12M:
-		vb2_set_plane_payload(&vbuf->vb2_buf, 0, output_size);
-		vb2_set_plane_payload(&vbuf->vb2_buf, 1, output_size / 2);
+		vbuf->vb2_buf.planes[0].bytesused = output_size;
+		vbuf->vb2_buf.planes[1].bytesused = output_size / 2;
 		break;
 	case V4L2_PIX_FMT_YUV420M:
-		vb2_set_plane_payload(&vbuf->vb2_buf, 0, output_size);
-		vb2_set_plane_payload(&vbuf->vb2_buf, 1, output_size / 4);
-		vb2_set_plane_payload(&vbuf->vb2_buf, 2, output_size / 4);
+		vbuf->vb2_buf.planes[0].bytesused = output_size;
+		vbuf->vb2_buf.planes[1].bytesused = output_size / 4;
+		vbuf->vb2_buf.planes[2].bytesused = output_size / 4;
 		break;
 	}
 

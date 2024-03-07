@@ -9,8 +9,6 @@
 #include <linux/pci.h>
 #include "processor_thermal_device.h"
 
-MODULE_IMPORT_NS(INT340X_THERMAL);
-
 struct mmio_reg {
 	int read_only;
 	u32 offset;
@@ -172,7 +170,6 @@ static const struct attribute_group fivr_attribute_group = {
 RFIM_SHOW(rfi_restriction_run_busy, 1)
 RFIM_SHOW(rfi_restriction_err_code, 1)
 RFIM_SHOW(rfi_restriction_data_rate, 1)
-RFIM_SHOW(rfi_restriction_data_rate_base, 1)
 RFIM_SHOW(ddr_data_rate_point_0, 1)
 RFIM_SHOW(ddr_data_rate_point_1, 1)
 RFIM_SHOW(ddr_data_rate_point_2, 1)
@@ -182,13 +179,11 @@ RFIM_SHOW(rfi_disable, 1)
 RFIM_STORE(rfi_restriction_run_busy, 1)
 RFIM_STORE(rfi_restriction_err_code, 1)
 RFIM_STORE(rfi_restriction_data_rate, 1)
-RFIM_STORE(rfi_restriction_data_rate_base, 1)
 RFIM_STORE(rfi_disable, 1)
 
 static DEVICE_ATTR_RW(rfi_restriction_run_busy);
 static DEVICE_ATTR_RW(rfi_restriction_err_code);
 static DEVICE_ATTR_RW(rfi_restriction_data_rate);
-static DEVICE_ATTR_RW(rfi_restriction_data_rate_base);
 static DEVICE_ATTR_RO(ddr_data_rate_point_0);
 static DEVICE_ATTR_RO(ddr_data_rate_point_1);
 static DEVICE_ATTR_RO(ddr_data_rate_point_2);
@@ -199,7 +194,8 @@ static ssize_t rfi_restriction_store(struct device *dev,
 				     struct device_attribute *attr,
 				     const char *buf, size_t count)
 {
-	u16 id = 0x0008;
+	u16 cmd_id = 0x0008;
+	u32 cmd_resp;
 	u32 input;
 	int ret;
 
@@ -207,7 +203,7 @@ static ssize_t rfi_restriction_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	ret = processor_thermal_send_mbox_write_cmd(to_pci_dev(dev), id, input);
+	ret = processor_thermal_send_mbox_cmd(to_pci_dev(dev), cmd_id, input, &cmd_resp);
 	if (ret)
 		return ret;
 
@@ -218,30 +214,30 @@ static ssize_t rfi_restriction_show(struct device *dev,
 				    struct device_attribute *attr,
 				    char *buf)
 {
-	u16 id = 0x0007;
-	u64 resp;
+	u16 cmd_id = 0x0007;
+	u32 cmd_resp;
 	int ret;
 
-	ret = processor_thermal_send_mbox_read_cmd(to_pci_dev(dev), id, &resp);
+	ret = processor_thermal_send_mbox_cmd(to_pci_dev(dev), cmd_id, 0, &cmd_resp);
 	if (ret)
 		return ret;
 
-	return sprintf(buf, "%llu\n", resp);
+	return sprintf(buf, "%u\n", cmd_resp);
 }
 
 static ssize_t ddr_data_rate_show(struct device *dev,
 				  struct device_attribute *attr,
 				  char *buf)
 {
-	u16 id = 0x0107;
-	u64 resp;
+	u16 cmd_id = 0x0107;
+	u32 cmd_resp;
 	int ret;
 
-	ret = processor_thermal_send_mbox_read_cmd(to_pci_dev(dev), id, &resp);
+	ret = processor_thermal_send_mbox_cmd(to_pci_dev(dev), cmd_id, 0, &cmd_resp);
 	if (ret)
 		return ret;
 
-	return sprintf(buf, "%llu\n", resp);
+	return sprintf(buf, "%u\n", cmd_resp);
 }
 
 static DEVICE_ATTR_RW(rfi_restriction);
@@ -251,7 +247,6 @@ static struct attribute *dvfs_attrs[] = {
 	&dev_attr_rfi_restriction_run_busy.attr,
 	&dev_attr_rfi_restriction_err_code.attr,
 	&dev_attr_rfi_restriction_data_rate.attr,
-	&dev_attr_rfi_restriction_data_rate_base.attr,
 	&dev_attr_ddr_data_rate_point_0.attr,
 	&dev_attr_ddr_data_rate_point_1.attr,
 	&dev_attr_ddr_data_rate_point_2.attr,

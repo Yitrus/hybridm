@@ -1013,7 +1013,7 @@ typedef struct r8192_priv {
 	bool		bis_any_nonbepkts;
 	bool		bcurrent_turbo_EDCA;
 	bool		bis_cur_rdlstate;
-	struct delayed_work fsync_work;
+	struct timer_list fsync_timer;
 	bool bfsync_processing;	/* 500ms Fsync timer is active or not */
 	u32	rate_record;
 	u32	rateCountDiffRecord;
@@ -1061,9 +1061,6 @@ typedef struct r8192_priv {
 	struct delayed_work gpio_change_rf_wq;
 	struct delayed_work initialgain_operate_wq;
 	struct workqueue_struct *priv_wq;
-
-	/* debugfs */
-	struct dentry *debugfs_dir;
 } r8192_priv;
 
 /* For rtl8187B */
@@ -1117,13 +1114,6 @@ void rtl8192_set_rxconf(struct net_device *dev);
 void rtl819xusb_beacon_tx(struct net_device *dev, u16 tx_rate);
 
 void EnableHWSecurityConfig8192(struct net_device *dev);
-void setKey(struct net_device *dev, u8 EntryNo, u8 KeyIndex, u16 KeyType,
-	    const u8 *MacAddr, u8 DefaultKey, u32 *KeyContent);
-
-void rtl8192_debugfs_init_one(struct net_device *dev);
-void rtl8192_debugfs_exit_one(struct net_device *dev);
-void rtl8192_debugfs_rename_one(struct net_device *dev);
-void rtl8192_debugfs_init(void);
-void rtl8192_debugfs_exit(void);
+void setKey(struct net_device *dev, u8 EntryNo, u8 KeyIndex, u16 KeyType, u8 *MacAddr, u8 DefaultKey, u32 *KeyContent);
 
 #endif

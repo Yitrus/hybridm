@@ -1,7 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/threads.h>
-#include <linux/linkage.h>
-
 #include <asm/processor.h>
 #include <asm/page.h>
 #include <asm/cputable.h>
@@ -183,7 +181,7 @@ _GLOBAL(swsusp_arch_resume)
 #ifdef CONFIG_ALTIVEC
 	/* Stop pending alitvec streams and memory accesses */
 BEGIN_FTR_SECTION
-	PPC_DSSALL
+	DSSALL
 END_FTR_SECTION_IFSET(CPU_FTR_ALTIVEC)
 #endif
  	sync
@@ -402,7 +400,7 @@ _ASM_NOKPROBE_SYMBOL(swsusp_arch_resume)
 /* FIXME:This construct is actually not useful since we don't shut
  * down the instruction MMU, we could just flip back MSR-DR on.
  */
-SYM_FUNC_START_LOCAL(turn_on_mmu)
+turn_on_mmu:
 	mflr	r4
 	mtsrr0	r4
 	mtsrr1	r3
@@ -410,5 +408,4 @@ SYM_FUNC_START_LOCAL(turn_on_mmu)
 	isync
 	rfi
 _ASM_NOKPROBE_SYMBOL(turn_on_mmu)
-SYM_FUNC_END(turn_on_mmu)
 

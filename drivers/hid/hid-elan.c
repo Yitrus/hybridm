@@ -188,6 +188,7 @@ static int elan_input_configured(struct hid_device *hdev, struct hid_input *hi)
 	ret = input_mt_init_slots(input, ELAN_MAX_FINGERS, INPUT_MT_POINTER);
 	if (ret) {
 		hid_err(hdev, "Failed to init elan MT slots: %d\n", ret);
+		input_free_device(input);
 		return ret;
 	}
 
@@ -199,6 +200,7 @@ static int elan_input_configured(struct hid_device *hdev, struct hid_input *hi)
 		hid_err(hdev, "Failed to register elan input device: %d\n",
 			ret);
 		input_mt_destroy_slots(input);
+		input_free_device(input);
 		return ret;
 	}
 
@@ -507,6 +509,11 @@ err:
 	return ret;
 }
 
+static void elan_remove(struct hid_device *hdev)
+{
+	hid_hw_stop(hdev);
+}
+
 static const struct hid_device_id elan_devices[] = {
 	{ HID_USB_DEVICE(USB_VENDOR_ID_ELAN, USB_DEVICE_ID_HP_X2),
 	  .driver_data = ELAN_HAS_LED },
@@ -524,6 +531,7 @@ static struct hid_driver elan_driver = {
 	.input_configured = elan_input_configured,
 	.raw_event = elan_raw_event,
 	.probe = elan_probe,
+	.remove = elan_remove,
 };
 
 module_hid_driver(elan_driver);

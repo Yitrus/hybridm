@@ -10,6 +10,11 @@
  */
 
 #include "aq_vec.h"
+#include "aq_nic.h"
+#include "aq_ring.h"
+#include "aq_hw.h"
+
+#include <linux/netdevice.h>
 
 struct aq_vec_s {
 	const struct aq_hw_ops *aq_hw_ops;
@@ -38,8 +43,8 @@ static int aq_vec_poll(struct napi_struct *napi, int budget)
 	if (!self) {
 		err = -EINVAL;
 	} else {
-		for (i = 0U; self->tx_rings > i; ++i) {
-			ring = self->ring[i];
+		for (i = 0U, ring = self->ring[0];
+			self->tx_rings > i; ++i, ring = self->ring[i]) {
 			u64_stats_update_begin(&ring[AQ_VEC_RX_ID].stats.rx.syncp);
 			ring[AQ_VEC_RX_ID].stats.rx.polls++;
 			u64_stats_update_end(&ring[AQ_VEC_RX_ID].stats.rx.syncp);
@@ -119,7 +124,8 @@ struct aq_vec_s *aq_vec_alloc(struct aq_nic_s *aq_nic, unsigned int idx,
 	self->tx_rings = 0;
 	self->rx_rings = 0;
 
-	netif_napi_add(aq_nic_get_ndev(aq_nic), &self->napi, aq_vec_poll);
+	netif_napi_add(aq_nic_get_ndev(aq_nic), &self->napi,
+		       aq_vec_poll, AQ_CFG_NAPI_WEIGHT);
 
 err_exit:
 	return self;
@@ -147,23 +153,9 @@ int aq_vec_ring_alloc(struct aq_vec_s *self, struct aq_nic_s *aq_nic,
 
 		aq_nic_set_tx_ring(aq_nic, idx_ring, ring);
 
-		if (xdp_rxq_info_reg(&self->ring[i][AQ_VEC_RX_ID].xdp_rxq,
-				     aq_nic->ndev, idx,
-				     self->napi.napi_id) < 0) {
-			err = -ENOMEM;
-			goto err_exit;
-		}
-		if (xdp_rxq_info_reg_mem_model(&self->ring[i][AQ_VEC_RX_ID].xdp_rxq,
-					       MEM_TYPE_PAGE_SHARED, NULL) < 0) {
-			xdp_rxq_info_unreg(&self->ring[i][AQ_VEC_RX_ID].xdp_rxq);
-			err = -ENOMEM;
-			goto err_exit;
-		}
-
 		ring = aq_ring_rx_alloc(&self->ring[i][AQ_VEC_RX_ID], aq_nic,
 					idx_ring, aq_nic_cfg);
 		if (!ring) {
-			xdp_rxq_info_unreg(&self->ring[i][AQ_VEC_RX_ID].xdp_rxq);
 			err = -ENOMEM;
 			goto err_exit;
 		}
@@ -190,8 +182,8 @@ int aq_vec_init(struct aq_vec_s *self, const struct aq_hw_ops *aq_hw_ops,
 	self->aq_hw_ops = aq_hw_ops;
 	self->aq_hw = aq_hw;
 
-	for (i = 0U; self->tx_rings > i; ++i) {
-		ring = self->ring[i];
+	for (i = 0U, ring = self->ring[0];
+		self->tx_rings > i; ++i, ring = self->ring[i]) {
 		err = aq_ring_init(&ring[AQ_VEC_TX_ID], ATL_RING_TX);
 		if (err < 0)
 			goto err_exit;
@@ -232,8 +224,8 @@ int aq_vec_start(struct aq_vec_s *self)
 	unsigned int i = 0U;
 	int err = 0;
 
-	for (i = 0U; self->tx_rings > i; ++i) {
-		ring = self->ring[i];
+	for (i = 0U, ring = self->ring[0];
+		self->tx_rings > i; ++i, ring = self->ring[i]) {
 		err = self->aq_hw_ops->hw_ring_tx_start(self->aq_hw,
 							&ring[AQ_VEC_TX_ID]);
 		if (err < 0)
@@ -256,8 +248,8 @@ void aq_vec_stop(struct aq_vec_s *self)
 	struct aq_ring_s *ring = NULL;
 	unsigned int i = 0U;
 
-	for (i = 0U; self->tx_rings > i; ++i) {
-		ring = self->ring[i];
+	for (i = 0U, ring = self->ring[0];
+		self->tx_rings > i; ++i, ring = self->ring[i]) {
 		self->aq_hw_ops->hw_ring_tx_stop(self->aq_hw,
 						 &ring[AQ_VEC_TX_ID]);
 
@@ -276,8 +268,8 @@ void aq_vec_deinit(struct aq_vec_s *self)
 	if (!self)
 		goto err_exit;
 
-	for (i = 0U; self->tx_rings > i; ++i) {
-		ring = self->ring[i];
+	for (i = 0U, ring = self->ring[0];
+		self->tx_rings > i; ++i, ring = self->ring[i]) {
 		aq_ring_tx_clean(&ring[AQ_VEC_TX_ID]);
 		aq_ring_rx_deinit(&ring[AQ_VEC_RX_ID]);
 	}
@@ -305,13 +297,11 @@ void aq_vec_ring_free(struct aq_vec_s *self)
 	if (!self)
 		goto err_exit;
 
-	for (i = 0U; self->tx_rings > i; ++i) {
-		ring = self->ring[i];
+	for (i = 0U, ring = self->ring[0];
+		self->tx_rings > i; ++i, ring = self->ring[i]) {
 		aq_ring_free(&ring[AQ_VEC_TX_ID]);
-		if (i < self->rx_rings) {
-			xdp_rxq_info_unreg(&ring[AQ_VEC_RX_ID].xdp_rxq);
+		if (i < self->rx_rings)
 			aq_ring_free(&ring[AQ_VEC_RX_ID]);
-		}
 	}
 
 	self->tx_rings = 0;

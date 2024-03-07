@@ -211,6 +211,7 @@ struct c_can_priv {
 	struct c_can_raminit raminit_sys;	/* RAMINIT via syscon regmap */
 	void (*raminit)(const struct c_can_priv *priv, bool enable);
 	u32 comm_rcv_high;
+	u32 dlc[];
 };
 
 struct net_device *alloc_c_can_dev(int msg_obj_num);
@@ -223,7 +224,7 @@ int c_can_power_up(struct net_device *dev);
 int c_can_power_down(struct net_device *dev);
 #endif
 
-extern const struct ethtool_ops c_can_ethtool_ops;
+void c_can_set_ethtool_ops(struct net_device *dev);
 
 static inline u8 c_can_get_tx_head(const struct c_can_tx_ring *ring)
 {
@@ -235,22 +236,9 @@ static inline u8 c_can_get_tx_tail(const struct c_can_tx_ring *ring)
 	return ring->tail & (ring->obj_num - 1);
 }
 
-static inline u8 c_can_get_tx_free(const struct c_can_priv *priv,
-				   const struct c_can_tx_ring *ring)
+static inline u8 c_can_get_tx_free(const struct c_can_tx_ring *ring)
 {
-	u8 head = c_can_get_tx_head(ring);
-	u8 tail = c_can_get_tx_tail(ring);
-
-	if (priv->type == BOSCH_D_CAN)
-		return ring->obj_num - (ring->head - ring->tail);
-
-	/* This is not a FIFO. C/D_CAN sends out the buffers
-	 * prioritized. The lowest buffer number wins.
-	 */
-	if (head < tail)
-		return 0;
-
-	return ring->obj_num - head;
+	return ring->obj_num - (ring->head - ring->tail);
 }
 
 #endif /* C_CAN_H */

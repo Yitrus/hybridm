@@ -1132,7 +1132,7 @@ static int read_log_page(struct ntfs_log *log, u32 vbo,
 		return -EINVAL;
 
 	if (!*buffer) {
-		to_free = kmalloc(log->page_size, GFP_NOFS);
+		to_free = kmalloc(bytes, GFP_NOFS);
 		if (!to_free)
 			return -ENOMEM;
 		*buffer = to_free;
@@ -1180,7 +1180,12 @@ static int log_read_rst(struct ntfs_log *log, u32 l_size, bool first,
 			struct restart_info *info)
 {
 	u32 skip, vbo;
-	struct RESTART_HDR *r_page = NULL;
+	struct RESTART_HDR *r_page = kmalloc(DefaultLogPageSize, GFP_NOFS);
+
+	if (!r_page)
+		return -ENOMEM;
+
+	memset(info, 0, sizeof(struct restart_info));
 
 	/* Determine which restart area we are looking for. */
 	if (first) {
@@ -1194,6 +1199,7 @@ static int log_read_rst(struct ntfs_log *log, u32 l_size, bool first,
 	/* Loop continuously until we succeed. */
 	for (; vbo < l_size; vbo = 2 * vbo + skip, skip = 0) {
 		bool usa_error;
+		u32 sys_page_size;
 		bool brst, bchk;
 		struct RESTART_AREA *ra;
 
@@ -1245,6 +1251,24 @@ static int log_read_rst(struct ntfs_log *log, u32 l_size, bool first,
 		if (bchk || ra->client_idx[1] == LFS_NO_CLIENT_LE) {
 			info->valid_page = true;
 			goto check_result;
+		}
+
+		/* Read the entire restart area. */
+		sys_page_size = le32_to_cpu(r_page->sys_page_size);
+		if (DefaultLogPageSize != sys_page_size) {
+			kfree(r_page);
+			r_page = kzalloc(sys_page_size, GFP_NOFS);
+			if (!r_page)
+				return -ENOMEM;
+
+			if (read_log_page(log, vbo,
+					  (struct RECORD_PAGE_HDR **)&r_page,
+					  &usa_error)) {
+				/* Ignore any errors. */
+				kfree(r_page);
+				r_page = NULL;
+				continue;
+			}
 		}
 
 		if (is_client_area_valid(r_page, usa_error)) {
@@ -2705,9 +2729,6 @@ static inline bool check_attr(const struct MFT_REC *rec,
 			return false;
 		}
 
-		if (run_off > asize)
-			return false;
-
 		if (run_unpack(NULL, sbi, 0, svcn, evcn, svcn,
 			       Add2Ptr(attr, run_off), asize - run_off) < 0) {
 			return false;
@@ -3029,7 +3050,7 @@ static int do_action(struct ntfs_log *log, struct OPEN_ATTR_ENRTY *oe,
 	struct NEW_ATTRIBUTE_SIZES *new_sz;
 	struct ATTR_FILE_NAME *fname;
 	struct OpenAttr *oa, *oa2;
-	u32 nsize, t32, asize, used, esize, off, bits;
+	u32 nsize, t32, asize, used, esize, bmp_off, bmp_bits;
 	u16 id, id2;
 	u32 record_size = sbi->record_size;
 	u64 t64;
@@ -3616,28 +3637,30 @@ move_data:
 		break;
 
 	case SetBitsInNonresidentBitMap:
-		off = le32_to_cpu(((struct BITMAP_RANGE *)data)->bitmap_off);
-		bits = le32_to_cpu(((struct BITMAP_RANGE *)data)->bits);
+		bmp_off =
+			le32_to_cpu(((struct BITMAP_RANGE *)data)->bitmap_off);
+		bmp_bits = le32_to_cpu(((struct BITMAP_RANGE *)data)->bits);
 
-		if (cbo + (off + 7) / 8 > lco ||
-		    cbo + ((off + bits + 7) / 8) > lco) {
+		if (cbo + (bmp_off + 7) / 8 > lco ||
+		    cbo + ((bmp_off + bmp_bits + 7) / 8) > lco) {
 			goto dirty_vol;
 		}
 
-		ntfs_bitmap_set_le(Add2Ptr(buffer_le, roff), off, bits);
+		__bitmap_set(Add2Ptr(buffer_le, roff), bmp_off, bmp_bits);
 		a_dirty = true;
 		break;
 
 	case ClearBitsInNonresidentBitMap:
-		off = le32_to_cpu(((struct BITMAP_RANGE *)data)->bitmap_off);
-		bits = le32_to_cpu(((struct BITMAP_RANGE *)data)->bits);
+		bmp_off =
+			le32_to_cpu(((struct BITMAP_RANGE *)data)->bitmap_off);
+		bmp_bits = le32_to_cpu(((struct BITMAP_RANGE *)data)->bits);
 
-		if (cbo + (off + 7) / 8 > lco ||
-		    cbo + ((off + bits + 7) / 8) > lco) {
+		if (cbo + (bmp_off + 7) / 8 > lco ||
+		    cbo + ((bmp_off + bmp_bits + 7) / 8) > lco) {
 			goto dirty_vol;
 		}
 
-		ntfs_bitmap_clear_le(Add2Ptr(buffer_le, roff), off, bits);
+		__bitmap_clear(Add2Ptr(buffer_le, roff), bmp_off, bmp_bits);
 		a_dirty = true;
 		break;
 
@@ -3768,11 +3791,10 @@ int log_replay(struct ntfs_inode *ni, bool *initialized)
 	if (!log)
 		return -ENOMEM;
 
-	memset(&rst_info, 0, sizeof(struct restart_info));
-
 	log->ni = ni;
 	log->l_size = l_size;
 	log->one_page_buf = kmalloc(page_size, GFP_NOFS);
+
 	if (!log->one_page_buf) {
 		err = -ENOMEM;
 		goto out;
@@ -3798,7 +3820,7 @@ int log_replay(struct ntfs_inode *ni, bool *initialized)
 		}
 
 		log_init_pg_hdr(log, page_size, page_size, 1, 1);
-		log_create(log, l_size, 0, get_random_u32(), false, false);
+		log_create(log, l_size, 0, get_random_int(), false, false);
 
 		log->ra = ra;
 
@@ -3820,10 +3842,7 @@ int log_replay(struct ntfs_inode *ni, bool *initialized)
 	if (rst_info.vbo)
 		goto check_restart_area;
 
-	memset(&rst_info2, 0, sizeof(struct restart_info));
 	err = log_read_rst(log, l_size, false, &rst_info2);
-	if (err)
-		goto out;
 
 	/* Determine which restart area to use. */
 	if (!rst_info2.restart || rst_info2.last_lsn <= rst_info.last_lsn)
@@ -3872,7 +3891,7 @@ check_restart_area:
 
 		/* Do some checks based on whether we have a valid log page. */
 		if (!rst_info.valid_page) {
-			open_log_count = get_random_u32();
+			open_log_count = get_random_int();
 			goto init_log_instance;
 		}
 		open_log_count = le32_to_cpu(ra2->open_log_count);
@@ -4023,7 +4042,7 @@ find_oldest:
 		memcpy(ra->clients, Add2Ptr(ra2, t16),
 		       le16_to_cpu(ra2->ra_len) - t16);
 
-		log->current_openlog_count = get_random_u32();
+		log->current_openlog_count = get_random_int();
 		ra->open_log_count = cpu_to_le32(log->current_openlog_count);
 		log->ra_size = offsetof(struct RESTART_AREA, clients) +
 			       sizeof(struct CLIENT_REC);
@@ -4066,10 +4085,8 @@ process_log:
 		if (client == LFS_NO_CLIENT_LE) {
 			/* Insert "NTFS" client LogFile. */
 			client = ra->client_idx[0];
-			if (client == LFS_NO_CLIENT_LE) {
-				err = -EINVAL;
-				goto out;
-			}
+			if (client == LFS_NO_CLIENT_LE)
+				return -EINVAL;
 
 			t16 = le16_to_cpu(client);
 			cr = ca + t16;
@@ -4750,12 +4767,6 @@ fake_attr:
 		u16 roff = le16_to_cpu(attr->nres.run_off);
 		CLST svcn = le64_to_cpu(attr->nres.svcn);
 
-		if (roff > t32) {
-			kfree(oa->attr);
-			oa->attr = NULL;
-			goto fake_attr;
-		}
-
 		err = run_unpack(&oa->run0, sbi, inode->i_ino, svcn,
 				 le64_to_cpu(attr->nres.evcn), svcn,
 				 Add2Ptr(attr, roff), t32 - roff);
@@ -4824,7 +4835,8 @@ next_dirty_page_vcn:
 		goto out;
 	}
 	attr = oa->attr;
-	if (size > le64_to_cpu(attr->nres.alloc_size)) {
+	t64 = le64_to_cpu(attr->nres.alloc_size);
+	if (size > t64) {
 		attr->nres.valid_size = attr->nres.data_size =
 			attr->nres.alloc_size = cpu_to_le64(size);
 	}
@@ -5043,7 +5055,7 @@ undo_action_next:
 		goto add_allocated_vcns;
 
 	vcn = le64_to_cpu(lrh->target_vcn);
-	vcn &= ~(u64)(log->clst_per_page - 1);
+	vcn &= ~(log->clst_per_page - 1);
 
 add_allocated_vcns:
 	for (i = 0, vcn = le64_to_cpu(lrh->target_vcn),

@@ -83,8 +83,8 @@ static struct linux_binfmt elf_fdpic_format = {
 	.load_binary	= load_elf_fdpic_binary,
 #ifdef CONFIG_ELF_CORE
 	.core_dump	= elf_fdpic_core_dump,
-	.min_coredump	= ELF_EXEC_PAGESIZE,
 #endif
+	.min_coredump	= ELF_EXEC_PAGESIZE,
 };
 
 static int __init init_elf_fdpic_binfmt(void)
@@ -434,9 +434,8 @@ static int load_elf_fdpic_binary(struct linux_binprm *bprm)
 	current->mm->start_stack = current->mm->start_brk + stack_size;
 #endif
 
-	retval = create_elf_fdpic_tables(bprm, current->mm, &exec_params,
-					 &interp_params);
-	if (retval < 0)
+	if (create_elf_fdpic_tables(bprm, current->mm,
+				    &exec_params, &interp_params) < 0)
 		goto error;
 
 	kdebug("- start_code  %lx", current->mm->start_code);
@@ -1466,7 +1465,7 @@ static bool elf_fdpic_dump_segments(struct coredump_params *cprm,
 static int elf_fdpic_core_dump(struct coredump_params *cprm)
 {
 	int has_dumped = 0;
-	int segs;
+	int vma_count, segs;
 	int i;
 	struct elfhdr *elf = NULL;
 	loff_t offset = 0, dataoff;
@@ -1481,6 +1480,8 @@ static int elf_fdpic_core_dump(struct coredump_params *cprm)
 	elf_addr_t e_shoff;
 	struct core_thread *ct;
 	struct elf_thread_status *tmp;
+	struct core_vma_metadata *vma_meta = NULL;
+	size_t vma_data_size;
 
 	/* alloc memory for large data structures: too large to be on stack */
 	elf = kmalloc(sizeof(*elf), GFP_KERNEL);
@@ -1490,7 +1491,10 @@ static int elf_fdpic_core_dump(struct coredump_params *cprm)
 	if (!psinfo)
 		goto end_coredump;
 
-	for (ct = current->signal->core_state->dumper.next;
+	if (dump_vma_snapshot(cprm, &vma_count, &vma_meta, &vma_data_size))
+		goto end_coredump;
+
+	for (ct = current->mm->core_state->dumper.next;
 					ct; ct = ct->next) {
 		tmp = elf_dump_thread_status(cprm->siginfo->si_signo,
 					     ct->task, &thread_status_size);
@@ -1509,7 +1513,7 @@ static int elf_fdpic_core_dump(struct coredump_params *cprm)
 	tmp->next = thread_list;
 	thread_list = tmp;
 
-	segs = cprm->vma_count + elf_core_extra_phdrs(cprm);
+	segs = vma_count + elf_core_extra_phdrs();
 
 	/* for notes section */
 	segs++;
@@ -1554,8 +1558,8 @@ static int elf_fdpic_core_dump(struct coredump_params *cprm)
 	/* Page-align dumped data */
 	dataoff = offset = roundup(offset, ELF_EXEC_PAGESIZE);
 
-	offset += cprm->vma_data_size;
-	offset += elf_core_extra_data_size(cprm);
+	offset += vma_data_size;
+	offset += elf_core_extra_data_size();
 	e_shoff = offset;
 
 	if (e_phnum == PN_XNUM) {
@@ -1574,8 +1578,8 @@ static int elf_fdpic_core_dump(struct coredump_params *cprm)
 		goto end_coredump;
 
 	/* write program headers for segments dump */
-	for (i = 0; i < cprm->vma_count; i++) {
-		struct core_vma_metadata *meta = cprm->vma_meta + i;
+	for (i = 0; i < vma_count; i++) {
+		struct core_vma_metadata *meta = vma_meta + i;
 		struct elf_phdr phdr;
 		size_t sz;
 
@@ -1604,7 +1608,7 @@ static int elf_fdpic_core_dump(struct coredump_params *cprm)
 	if (!elf_core_write_extra_phdrs(cprm, offset))
 		goto end_coredump;
 
-	/* write out the notes section */
+ 	/* write out the notes section */
 	if (!writenote(thread_list->notes, cprm))
 		goto end_coredump;
 	if (!writenote(&psinfo_note, cprm))
@@ -1624,7 +1628,7 @@ static int elf_fdpic_core_dump(struct coredump_params *cprm)
 
 	dump_skip_to(cprm, dataoff);
 
-	if (!elf_fdpic_dump_segments(cprm, cprm->vma_meta, cprm->vma_count))
+	if (!elf_fdpic_dump_segments(cprm, vma_meta, vma_count))
 		goto end_coredump;
 
 	if (!elf_core_write_extra_data(cprm))
@@ -1648,6 +1652,7 @@ end_coredump:
 		thread_list = thread_list->next;
 		kfree(tmp);
 	}
+	kvfree(vma_meta);
 	kfree(phdr4note);
 	kfree(elf);
 	kfree(psinfo);

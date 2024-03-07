@@ -124,6 +124,9 @@ static const struct attribute_group *iio_sysfs_trigger_attr_groups[] = {
 	NULL
 };
 
+static const struct iio_trigger_ops iio_sysfs_trigger_ops = {
+};
+
 static int iio_sysfs_trigger_probe(int id)
 {
 	struct iio_sysfs_trig *t;
@@ -138,59 +141,60 @@ static int iio_sysfs_trigger_probe(int id)
 		}
 	if (foundit) {
 		ret = -EINVAL;
-		goto err_unlock;
+		goto out1;
 	}
 	t = kmalloc(sizeof(*t), GFP_KERNEL);
 	if (t == NULL) {
 		ret = -ENOMEM;
-		goto err_unlock;
+		goto out1;
 	}
 	t->id = id;
 	t->trig = iio_trigger_alloc(&iio_sysfs_trig_dev, "sysfstrig%d", id);
 	if (!t->trig) {
 		ret = -ENOMEM;
-		goto err_free_sys_trig;
+		goto free_t;
 	}
 
 	t->trig->dev.groups = iio_sysfs_trigger_attr_groups;
+	t->trig->ops = &iio_sysfs_trigger_ops;
 	iio_trigger_set_drvdata(t->trig, t);
 
 	t->work = IRQ_WORK_INIT_HARD(iio_sysfs_trigger_work);
 
 	ret = iio_trigger_register(t->trig);
 	if (ret)
-		goto err_free_trig;
+		goto out2;
 	list_add(&t->l, &iio_sysfs_trig_list);
 	__module_get(THIS_MODULE);
 	mutex_unlock(&iio_sysfs_trig_list_mut);
 	return 0;
 
-err_free_trig:
+out2:
 	iio_trigger_free(t->trig);
-err_free_sys_trig:
+free_t:
 	kfree(t);
-err_unlock:
+out1:
 	mutex_unlock(&iio_sysfs_trig_list_mut);
 	return ret;
 }
 
 static int iio_sysfs_trigger_remove(int id)
 {
-	struct iio_sysfs_trig *t = NULL, *iter;
+	bool foundit = false;
+	struct iio_sysfs_trig *t;
 
 	mutex_lock(&iio_sysfs_trig_list_mut);
-	list_for_each_entry(iter, &iio_sysfs_trig_list, l)
-		if (id == iter->id) {
-			t = iter;
+	list_for_each_entry(t, &iio_sysfs_trig_list, l)
+		if (id == t->id) {
+			foundit = true;
 			break;
 		}
-	if (!t) {
+	if (!foundit) {
 		mutex_unlock(&iio_sysfs_trig_list_mut);
 		return -EINVAL;
 	}
 
 	iio_trigger_unregister(t->trig);
-	irq_work_sync(&t->work);
 	iio_trigger_free(t->trig);
 
 	list_del(&t->l);
@@ -203,13 +207,9 @@ static int iio_sysfs_trigger_remove(int id)
 
 static int __init iio_sysfs_trig_init(void)
 {
-	int ret;
 	device_initialize(&iio_sysfs_trig_dev);
 	dev_set_name(&iio_sysfs_trig_dev, "iio_sysfs_trigger");
-	ret = device_add(&iio_sysfs_trig_dev);
-	if (ret)
-		put_device(&iio_sysfs_trig_dev);
-	return ret;
+	return device_add(&iio_sysfs_trig_dev);
 }
 module_init(iio_sysfs_trig_init);
 

@@ -33,6 +33,8 @@
 
 #include <mm/mmu_decl.h>
 
+extern char etext[], _stext[], _sinittext[], _einittext[];
+
 static u8 early_fixmap_pagetable[FIXMAP_PTE_SIZE] __page_aligned_data;
 
 notrace void __init early_ioremap_init(void)
@@ -102,13 +104,14 @@ static void __init __mapin_ram_chunk(unsigned long offset, unsigned long top)
 {
 	unsigned long v, s;
 	phys_addr_t p;
-	bool ktext;
+	int ktext;
 
 	s = offset;
 	v = PAGE_OFFSET + s;
 	p = memstart_addr + s;
 	for (; s < top; s += PAGE_SIZE) {
-		ktext = core_kernel_text(v);
+		ktext = ((char *)v >= _stext && (char *)v < etext) ||
+			((char *)v >= _sinittext && (char *)v < _einittext);
 		map_kernel_page(v, p, ktext ? PAGE_KERNEL_TEXT : PAGE_KERNEL);
 		v += PAGE_SIZE;
 		p += PAGE_SIZE;
@@ -135,12 +138,10 @@ void mark_initmem_nx(void)
 	unsigned long numpages = PFN_UP((unsigned long)_einittext) -
 				 PFN_DOWN((unsigned long)_sinittext);
 
-	mmu_mark_initmem_nx();
-
-	if (!v_block_mapped((unsigned long)_sinittext)) {
-		set_memory_nx((unsigned long)_sinittext, numpages);
-		set_memory_rw((unsigned long)_sinittext, numpages);
-	}
+	if (v_block_mapped((unsigned long)_sinittext))
+		mmu_mark_initmem_nx();
+	else
+		set_memory_attr((unsigned long)_sinittext, numpages, PAGE_KERNEL);
 }
 
 #ifdef CONFIG_STRICT_KERNEL_RWX
@@ -148,24 +149,24 @@ void mark_rodata_ro(void)
 {
 	unsigned long numpages;
 
-	if (IS_ENABLED(CONFIG_STRICT_MODULE_RWX) && mmu_has_feature(MMU_FTR_HPTE_TABLE))
-		pr_warn("This platform has HASH MMU, STRICT_MODULE_RWX won't work\n");
-
 	if (v_block_mapped((unsigned long)_stext + 1)) {
 		mmu_mark_rodata_ro();
 		ptdump_check_wx();
 		return;
 	}
 
-	/*
-	 * mark text and rodata as read only. __end_rodata is set by
-	 * powerpc's linker script and includes tables and data
-	 * requiring relocation which are not put in RO_DATA.
-	 */
-	numpages = PFN_UP((unsigned long)__end_rodata) -
+	numpages = PFN_UP((unsigned long)_etext) -
 		   PFN_DOWN((unsigned long)_stext);
 
-	set_memory_ro((unsigned long)_stext, numpages);
+	set_memory_attr((unsigned long)_stext, numpages, PAGE_KERNEL_ROX);
+	/*
+	 * mark .rodata as read only. Use __init_begin rather than __end_rodata
+	 * to cover NOTES and EXCEPTION_TABLE.
+	 */
+	numpages = PFN_UP((unsigned long)__init_begin) -
+		   PFN_DOWN((unsigned long)__start_rodata);
+
+	set_memory_attr((unsigned long)__start_rodata, numpages, PAGE_KERNEL_RO);
 
 	// mark_initmem_nx() should have already run by now
 	ptdump_check_wx();
@@ -181,8 +182,8 @@ void __kernel_map_pages(struct page *page, int numpages, int enable)
 		return;
 
 	if (enable)
-		set_memory_p(addr, numpages);
+		set_memory_attr(addr, numpages, PAGE_KERNEL);
 	else
-		set_memory_np(addr, numpages);
+		set_memory_attr(addr, numpages, __pgprot(0));
 }
 #endif /* CONFIG_DEBUG_PAGEALLOC */

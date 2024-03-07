@@ -13,6 +13,7 @@
 	 * This is based on the official GPU firmware DT blob.
 	 *
 	 * Legend:
+	 * "NC" = not connected (no rail from the SoC)
 	 * "FOO" = GPIO line named "FOO" on the schematic
 	 * "FOO_N" = GPIO line named "FOO" on schematic, active low
 	 */
@@ -62,8 +63,8 @@
 			  "GPIO43",
 			  "GPIO44",
 			  "GPIO45",
-			  "SMPS_SCL",
-			  "SMPS_SDA",
+			  "GPIO46",
+			  "GPIO47",
 			  /* Used by eMMC */
 			  "SD_CLK_R",
 			  "SD_CMD_R",

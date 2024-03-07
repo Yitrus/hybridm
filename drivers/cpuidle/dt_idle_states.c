@@ -211,15 +211,18 @@ int dt_init_idle_driver(struct cpuidle_driver *drv,
 	of_node_put(cpu_node);
 	if (err)
 		return err;
-
-	/* Set the number of total supported idle states. */
-	drv->state_count = state_idx;
+	/*
+	 * Update the driver state count only if some valid DT idle states
+	 * were detected
+	 */
+	if (i)
+		drv->state_count = state_idx;
 
 	/*
 	 * Return the number of present and valid DT idle states, which can
 	 * also be 0 on platforms with missing DT idle states or legacy DT
 	 * configuration predating the DT idle states bindings.
 	 */
-	return state_idx - start_idx;
+	return i;
 }
 EXPORT_SYMBOL_GPL(dt_init_idle_driver);

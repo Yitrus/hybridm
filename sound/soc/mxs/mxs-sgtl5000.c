@@ -118,9 +118,6 @@ static int mxs_sgtl5000_probe(struct platform_device *pdev)
 	codec_np = of_parse_phandle(np, "audio-codec", 0);
 	if (!saif_np[0] || !saif_np[1] || !codec_np) {
 		dev_err(&pdev->dev, "phandle missing or invalid\n");
-		of_node_put(codec_np);
-		of_node_put(saif_np[0]);
-		of_node_put(saif_np[1]);
 		return -EINVAL;
 	}
 
@@ -163,8 +160,12 @@ static int mxs_sgtl5000_probe(struct platform_device *pdev)
 	}
 
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
-	if (ret)
-		return dev_err_probe(&pdev->dev, ret, "snd_soc_register_card failed\n");
+	if (ret) {
+		if (ret != -EPROBE_DEFER)
+			dev_err(&pdev->dev, "snd_soc_register_card failed (%d)\n",
+				ret);
+		return ret;
+	}
 
 	return 0;
 }

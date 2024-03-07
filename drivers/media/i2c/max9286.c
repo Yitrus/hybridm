@@ -15,7 +15,6 @@
 #include <linux/fwnode.h>
 #include <linux/gpio/consumer.h>
 #include <linux/gpio/driver.h>
-#include <linux/gpio/machine.h>
 #include <linux/i2c.h>
 #include <linux/i2c-mux.h>
 #include <linux/module.h>
@@ -168,8 +167,6 @@ struct max9286_priv {
 	/* The initial reverse control channel amplitude. */
 	u32 init_rev_chan_mv;
 	u32 rev_chan_mv;
-
-	u32 gpio_poc[2];
 
 	struct v4l2_ctrl_handler ctrls;
 	struct v4l2_ctrl *pixelrate;
@@ -609,18 +606,19 @@ static int max9286_v4l2_notifier_register(struct max9286_priv *priv)
 	if (!priv->nsources)
 		return 0;
 
-	v4l2_async_nf_init(&priv->notifier);
+	v4l2_async_notifier_init(&priv->notifier);
 
 	for_each_source(priv, source) {
 		unsigned int i = to_index(priv, source);
 		struct max9286_asd *mas;
 
-		mas = v4l2_async_nf_add_fwnode(&priv->notifier, source->fwnode,
-					       struct max9286_asd);
+		mas = v4l2_async_notifier_add_fwnode_subdev(&priv->notifier,
+							    source->fwnode,
+							    struct max9286_asd);
 		if (IS_ERR(mas)) {
 			dev_err(dev, "Failed to add subdev for source %u: %ld",
 				i, PTR_ERR(mas));
-			v4l2_async_nf_cleanup(&priv->notifier);
+			v4l2_async_notifier_cleanup(&priv->notifier);
 			return PTR_ERR(mas);
 		}
 
@@ -629,10 +627,10 @@ static int max9286_v4l2_notifier_register(struct max9286_priv *priv)
 
 	priv->notifier.ops = &max9286_notify_ops;
 
-	ret = v4l2_async_subdev_nf_register(&priv->sd, &priv->notifier);
+	ret = v4l2_async_subdev_notifier_register(&priv->sd, &priv->notifier);
 	if (ret) {
 		dev_err(dev, "Failed to register subdev_notifier");
-		v4l2_async_nf_cleanup(&priv->notifier);
+		v4l2_async_notifier_cleanup(&priv->notifier);
 		return ret;
 	}
 
@@ -644,8 +642,8 @@ static void max9286_v4l2_notifier_unregister(struct max9286_priv *priv)
 	if (!priv->nsources)
 		return;
 
-	v4l2_async_nf_unregister(&priv->notifier);
-	v4l2_async_nf_cleanup(&priv->notifier);
+	v4l2_async_notifier_unregister(&priv->notifier);
+	v4l2_async_notifier_cleanup(&priv->notifier);
 }
 
 static int max9286_s_stream(struct v4l2_subdev *sd, int enable)
@@ -849,10 +847,6 @@ static const struct v4l2_subdev_internal_ops max9286_subdev_internal_ops = {
 	.open = max9286_open,
 };
 
-static const struct media_entity_operations max9286_media_ops = {
-	.link_validate = v4l2_subdev_link_validate
-};
-
 static int max9286_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	switch (ctrl->id) {
@@ -902,7 +896,6 @@ static int max9286_v4l2_register(struct max9286_priv *priv)
 		goto err_async;
 
 	priv->sd.entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
-	priv->sd.entity.ops = &max9286_media_ops;
 
 	priv->pads[MAX9286_SRC_PAD].flags = MEDIA_PAD_FL_SOURCE;
 	for (i = 0; i < MAX9286_SRC_PAD; i++)
@@ -1033,27 +1026,20 @@ static int max9286_setup(struct max9286_priv *priv)
 	return 0;
 }
 
-static int max9286_gpio_set(struct max9286_priv *priv, unsigned int offset,
-			    int value)
+static void max9286_gpio_set(struct gpio_chip *chip,
+			     unsigned int offset, int value)
 {
+	struct max9286_priv *priv = gpiochip_get_data(chip);
+
 	if (value)
 		priv->gpio_state |= BIT(offset);
 	else
 		priv->gpio_state &= ~BIT(offset);
 
-	return max9286_write(priv, 0x0f,
-			     MAX9286_0X0F_RESERVED | priv->gpio_state);
+	max9286_write(priv, 0x0f, MAX9286_0X0F_RESERVED | priv->gpio_state);
 }
 
-static void max9286_gpiochip_set(struct gpio_chip *chip,
-				 unsigned int offset, int value)
-{
-	struct max9286_priv *priv = gpiochip_get_data(chip);
-
-	max9286_gpio_set(priv, offset, value);
-}
-
-static int max9286_gpiochip_get(struct gpio_chip *chip, unsigned int offset)
+static int max9286_gpio_get(struct gpio_chip *chip, unsigned int offset)
 {
 	struct max9286_priv *priv = gpiochip_get_data(chip);
 
@@ -1070,11 +1056,15 @@ static int max9286_register_gpio(struct max9286_priv *priv)
 	gpio->label = dev_name(dev);
 	gpio->parent = dev;
 	gpio->owner = THIS_MODULE;
+	gpio->of_node = dev->of_node;
 	gpio->ngpio = 2;
 	gpio->base = -1;
-	gpio->set = max9286_gpiochip_set;
-	gpio->get = max9286_gpiochip_get;
+	gpio->set = max9286_gpio_set;
+	gpio->get = max9286_gpio_get;
 	gpio->can_sleep = true;
+
+	/* GPIO values default to high */
+	priv->gpio_state = BIT(0) | BIT(1);
 
 	ret = devm_gpiochip_add_data(dev, gpio, priv);
 	if (ret)
@@ -1083,83 +1073,26 @@ static int max9286_register_gpio(struct max9286_priv *priv)
 	return ret;
 }
 
-static int max9286_parse_gpios(struct max9286_priv *priv)
+static int max9286_init(struct device *dev)
 {
-	struct device *dev = &priv->client->dev;
+	struct max9286_priv *priv;
+	struct i2c_client *client;
 	int ret;
 
-	/* GPIO values default to high */
-	priv->gpio_state = BIT(0) | BIT(1);
+	client = to_i2c_client(dev);
+	priv = i2c_get_clientdata(client);
 
-	/*
-	 * Parse the "gpio-poc" vendor property. If the property is not
-	 * specified the camera power is controlled by a regulator.
-	 */
-	ret = of_property_read_u32_array(dev->of_node, "maxim,gpio-poc",
-					 priv->gpio_poc, 2);
-	if (ret == -EINVAL) {
-		/*
-		 * If gpio lines are not used for the camera power, register
-		 * a gpio controller for consumers.
-		 */
-		ret = max9286_register_gpio(priv);
-		if (ret)
-			return ret;
-
-		priv->regulator = devm_regulator_get(dev, "poc");
-		if (IS_ERR(priv->regulator)) {
-			return dev_err_probe(dev, PTR_ERR(priv->regulator),
-					     "Unable to get PoC regulator (%ld)\n",
-					     PTR_ERR(priv->regulator));
-		}
-
-		return 0;
-	}
-
-	/* If the property is specified make sure it is well formed. */
-	if (ret || priv->gpio_poc[0] > 1 ||
-	    (priv->gpio_poc[1] != GPIO_ACTIVE_HIGH &&
-	     priv->gpio_poc[1] != GPIO_ACTIVE_LOW)) {
-		dev_err(dev, "Invalid 'gpio-poc' property\n");
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int max9286_poc_enable(struct max9286_priv *priv, bool enable)
-{
-	int ret;
-
-	/* If the regulator is not available, use gpio to control power. */
-	if (!priv->regulator)
-		ret = max9286_gpio_set(priv, priv->gpio_poc[0],
-				       enable ^ priv->gpio_poc[1]);
-	else if (enable)
-		ret = regulator_enable(priv->regulator);
-	else
-		ret = regulator_disable(priv->regulator);
-
-	if (ret < 0)
-		dev_err(&priv->client->dev, "Unable to turn power %s\n",
-			enable ? "on" : "off");
-
-	return ret;
-}
-
-static int max9286_init(struct max9286_priv *priv)
-{
-	struct i2c_client *client = priv->client;
-	int ret;
-
-	ret = max9286_poc_enable(priv, true);
-	if (ret)
+	/* Enable the bus power. */
+	ret = regulator_enable(priv->regulator);
+	if (ret < 0) {
+		dev_err(&client->dev, "Unable to turn PoC on\n");
 		return ret;
+	}
 
 	ret = max9286_setup(priv);
 	if (ret) {
-		dev_err(&client->dev, "Unable to setup max9286\n");
-		goto err_poc_disable;
+		dev_err(dev, "Unable to setup max9286\n");
+		goto err_regulator;
 	}
 
 	/*
@@ -1168,13 +1101,13 @@ static int max9286_init(struct max9286_priv *priv)
 	 */
 	ret = max9286_v4l2_register(priv);
 	if (ret) {
-		dev_err(&client->dev, "Failed to register with V4L2\n");
-		goto err_poc_disable;
+		dev_err(dev, "Failed to register with V4L2\n");
+		goto err_regulator;
 	}
 
 	ret = max9286_i2c_mux_init(priv);
 	if (ret) {
-		dev_err(&client->dev, "Unable to initialize I2C multiplexer\n");
+		dev_err(dev, "Unable to initialize I2C multiplexer\n");
 		goto err_v4l2_register;
 	}
 
@@ -1185,8 +1118,8 @@ static int max9286_init(struct max9286_priv *priv)
 
 err_v4l2_register:
 	max9286_v4l2_unregister(priv);
-err_poc_disable:
-	max9286_poc_enable(priv, false);
+err_regulator:
+	regulator_disable(priv->regulator);
 
 	return ret;
 }
@@ -1329,6 +1262,7 @@ static int max9286_probe(struct i2c_client *client)
 	mutex_init(&priv->mutex);
 
 	priv->client = client;
+	i2c_set_clientdata(client, priv);
 
 	priv->gpiod_pwdn = devm_gpiod_get_optional(&client->dev, "enable",
 						   GPIOD_OUT_HIGH);
@@ -1356,15 +1290,25 @@ static int max9286_probe(struct i2c_client *client)
 	 */
 	max9286_configure_i2c(priv, false);
 
-	ret = max9286_parse_gpios(priv);
+	ret = max9286_register_gpio(priv);
 	if (ret)
 		goto err_powerdown;
+
+	priv->regulator = devm_regulator_get(&client->dev, "poc");
+	if (IS_ERR(priv->regulator)) {
+		if (PTR_ERR(priv->regulator) != -EPROBE_DEFER)
+			dev_err(&client->dev,
+				"Unable to get PoC regulator (%ld)\n",
+				PTR_ERR(priv->regulator));
+		ret = PTR_ERR(priv->regulator);
+		goto err_powerdown;
+	}
 
 	ret = max9286_parse_dt(priv);
 	if (ret)
 		goto err_powerdown;
 
-	ret = max9286_init(priv);
+	ret = max9286_init(&client->dev);
 	if (ret < 0)
 		goto err_cleanup_dt;
 
@@ -1378,19 +1322,21 @@ err_powerdown:
 	return ret;
 }
 
-static void max9286_remove(struct i2c_client *client)
+static int max9286_remove(struct i2c_client *client)
 {
-	struct max9286_priv *priv = sd_to_max9286(i2c_get_clientdata(client));
+	struct max9286_priv *priv = i2c_get_clientdata(client);
 
 	i2c_mux_del_adapters(priv->mux);
 
 	max9286_v4l2_unregister(priv);
 
-	max9286_poc_enable(priv, false);
+	regulator_disable(priv->regulator);
 
 	gpiod_set_value_cansleep(priv->gpiod_pwdn, 0);
 
 	max9286_cleanup_dt(priv);
+
+	return 0;
 }
 
 static const struct of_device_id max9286_dt_ids[] = {

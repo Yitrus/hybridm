@@ -18,7 +18,7 @@
 #include <video/imx-ipu-v3.h>
 
 #include <drm/drm_atomic_helper.h>
-#include <drm/drm_edid.h>
+#include <drm/drm_fb_helper.h>
 #include <drm/drm_managed.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_simple_kms_helper.h>
@@ -217,9 +217,8 @@ static int imx_tve_connector_get_modes(struct drm_connector *connector)
 	return ret;
 }
 
-static enum drm_mode_status
-imx_tve_connector_mode_valid(struct drm_connector *connector,
-			     struct drm_display_mode *mode)
+static int imx_tve_connector_mode_valid(struct drm_connector *connector,
+					struct drm_display_mode *mode)
 {
 	struct imx_tve *tve = con_to_tve(connector);
 	unsigned long rate;
@@ -527,6 +526,7 @@ static int imx_tve_probe(struct platform_device *pdev)
 	struct device_node *np = dev->of_node;
 	struct device_node *ddc_node;
 	struct imx_tve *tve;
+	struct resource *res;
 	void __iomem *base;
 	unsigned int val;
 	int irq;
@@ -568,7 +568,8 @@ static int imx_tve_probe(struct platform_device *pdev)
 		}
 	}
 
-	base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	base = devm_ioremap_resource(dev, res);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 

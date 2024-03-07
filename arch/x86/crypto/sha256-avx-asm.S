@@ -48,7 +48,6 @@
 ########################################################################
 
 #include <linux/linkage.h>
-#include <linux/cfi_types.h>
 
 ## assume buffers not aligned
 #define    VMOVDQ vmovdqu
@@ -347,7 +346,8 @@ a = TMP_
 ## arg 3 : Num blocks
 ########################################################################
 .text
-SYM_TYPED_FUNC_START(sha256_transform_avx)
+SYM_FUNC_START(sha256_transform_avx)
+.align 32
 	pushq   %rbx
 	pushq   %r12
 	pushq   %r13
@@ -458,7 +458,7 @@ done_hash:
 	popq    %r13
 	popq	%r12
 	popq    %rbx
-	RET
+	ret
 SYM_FUNC_END(sha256_transform_avx)
 
 .section	.rodata.cst256.K256, "aM", @progbits, 256

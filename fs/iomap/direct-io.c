@@ -6,8 +6,6 @@
 #include <linux/module.h>
 #include <linux/compiler.h>
 #include <linux/fs.h>
-#include <linux/fscrypt.h>
-#include <linux/pagemap.h>
 #include <linux/iomap.h>
 #include <linux/backing-dev.h>
 #include <linux/uio.h>
@@ -33,7 +31,6 @@ struct iomap_dio {
 	atomic_t		ref;
 	unsigned		flags;
 	int			error;
-	size_t			done_before;
 	bool			wait_for_completion;
 
 	union {
@@ -41,7 +38,8 @@ struct iomap_dio {
 		struct {
 			struct iov_iter		*iter;
 			struct task_struct	*waiter;
-			struct bio		*poll_bio;
+			struct request_queue	*last_queue;
+			blk_qc_t		cookie;
 		} submit;
 
 		/* used for aio completion: */
@@ -51,30 +49,29 @@ struct iomap_dio {
 	};
 };
 
-static struct bio *iomap_dio_alloc_bio(const struct iomap_iter *iter,
-		struct iomap_dio *dio, unsigned short nr_vecs, blk_opf_t opf)
+int iomap_dio_iopoll(struct kiocb *kiocb, bool spin)
 {
-	if (dio->dops && dio->dops->bio_set)
-		return bio_alloc_bioset(iter->iomap.bdev, nr_vecs, opf,
-					GFP_KERNEL, dio->dops->bio_set);
-	return bio_alloc(iter->iomap.bdev, nr_vecs, opf, GFP_KERNEL);
+	struct request_queue *q = READ_ONCE(kiocb->private);
+
+	if (!q)
+		return 0;
+	return blk_poll(q, READ_ONCE(kiocb->ki_cookie), spin);
 }
+EXPORT_SYMBOL_GPL(iomap_dio_iopoll);
 
 static void iomap_dio_submit_bio(const struct iomap_iter *iter,
 		struct iomap_dio *dio, struct bio *bio, loff_t pos)
 {
 	atomic_inc(&dio->ref);
 
-	/* Sync dio can't be polled reliably */
-	if ((dio->iocb->ki_flags & IOCB_HIPRI) && !is_sync_kiocb(dio->iocb)) {
+	if (dio->iocb->ki_flags & IOCB_HIPRI)
 		bio_set_polled(bio, dio->iocb);
-		dio->submit.poll_bio = bio;
-	}
 
+	dio->submit.last_queue = bdev_get_queue(iter->iomap.bdev);
 	if (dio->dops && dio->dops->submit_io)
-		dio->dops->submit_io(iter, bio, pos);
+		dio->submit.cookie = dio->dops->submit_io(iter, bio, pos);
 	else
-		submit_bio(bio);
+		dio->submit.cookie = submit_bio(bio);
 }
 
 ssize_t iomap_dio_complete(struct iomap_dio *dio)
@@ -127,9 +124,6 @@ ssize_t iomap_dio_complete(struct iomap_dio *dio)
 	if (ret > 0 && (dio->flags & IOMAP_DIO_NEED_SYNC))
 		ret = generic_write_sync(iocb, ret);
 
-	if (ret > 0)
-		ret += dio->done_before;
-
 	kfree(dio);
 
 	return ret;
@@ -141,7 +135,7 @@ static void iomap_dio_complete_work(struct work_struct *work)
 	struct iomap_dio *dio = container_of(work, struct iomap_dio, aio.work);
 	struct kiocb *iocb = dio->iocb;
 
-	iocb->ki_complete(iocb, iomap_dio_complete(dio));
+	iocb->ki_complete(iocb, iomap_dio_complete(dio), 0);
 }
 
 /*
@@ -154,7 +148,7 @@ static inline void iomap_dio_set_error(struct iomap_dio *dio, int ret)
 	cmpxchg(&dio->error, 0, ret);
 }
 
-void iomap_dio_bio_end_io(struct bio *bio)
+static void iomap_dio_bio_end_io(struct bio *bio)
 {
 	struct iomap_dio *dio = bio->bi_private;
 	bool should_dirty = (dio->flags & IOMAP_DIO_DIRTY);
@@ -170,11 +164,9 @@ void iomap_dio_bio_end_io(struct bio *bio)
 		} else if (dio->flags & IOMAP_DIO_WRITE) {
 			struct inode *inode = file_inode(dio->iocb->ki_filp);
 
-			WRITE_ONCE(dio->iocb->private, NULL);
 			INIT_WORK(&dio->aio.work, iomap_dio_complete_work);
 			queue_work(inode->i_sb->s_dio_done_wq, &dio->aio.work);
 		} else {
-			WRITE_ONCE(dio->iocb->private, NULL);
 			iomap_dio_complete_work(&dio->aio.work);
 		}
 	}
@@ -186,24 +178,23 @@ void iomap_dio_bio_end_io(struct bio *bio)
 		bio_put(bio);
 	}
 }
-EXPORT_SYMBOL_GPL(iomap_dio_bio_end_io);
 
 static void iomap_dio_zero(const struct iomap_iter *iter, struct iomap_dio *dio,
 		loff_t pos, unsigned len)
 {
-	struct inode *inode = file_inode(dio->iocb->ki_filp);
 	struct page *page = ZERO_PAGE(0);
+	int flags = REQ_SYNC | REQ_IDLE;
 	struct bio *bio;
 
-	bio = iomap_dio_alloc_bio(iter, dio, 1, REQ_OP_WRITE | REQ_SYNC | REQ_IDLE);
-	fscrypt_set_bio_crypt_ctx(bio, inode, pos >> inode->i_blkbits,
-				  GFP_KERNEL);
+	bio = bio_alloc(GFP_KERNEL, 1);
+	bio_set_dev(bio, iter->iomap.bdev);
 	bio->bi_iter.bi_sector = iomap_sector(&iter->iomap, pos);
 	bio->bi_private = dio;
 	bio->bi_end_io = iomap_dio_bio_end_io;
 
 	get_page(page);
 	__bio_add_page(bio, page, len, 0);
+	bio_set_op_attrs(bio, REQ_OP_WRITE, flags);
 	iomap_dio_submit_bio(iter, dio, bio, pos);
 }
 
@@ -212,10 +203,10 @@ static void iomap_dio_zero(const struct iomap_iter *iter, struct iomap_dio *dio,
  * mapping, and whether or not we want FUA.  Note that we can end up
  * clearing the WRITE_FUA flag in the dio request.
  */
-static inline blk_opf_t iomap_dio_bio_opflags(struct iomap_dio *dio,
+static inline unsigned int iomap_dio_bio_opflags(struct iomap_dio *dio,
 		const struct iomap *iomap, bool use_fua)
 {
-	blk_opf_t opflags = REQ_SYNC | REQ_IDLE;
+	unsigned int opflags = REQ_SYNC | REQ_IDLE;
 
 	if (!(dio->flags & IOMAP_DIO_WRITE)) {
 		WARN_ON_ONCE(iomap->flags & IOMAP_F_ZONE_APPEND);
@@ -240,10 +231,12 @@ static loff_t iomap_dio_bio_iter(const struct iomap_iter *iter,
 {
 	const struct iomap *iomap = &iter->iomap;
 	struct inode *inode = iter->inode;
+	unsigned int blkbits = blksize_bits(bdev_logical_block_size(iomap->bdev));
 	unsigned int fs_block_size = i_blocksize(inode), pad;
+	unsigned int align = iov_iter_alignment(dio->submit.iter);
 	loff_t length = iomap_length(iter);
 	loff_t pos = iter->pos;
-	blk_opf_t bio_opf;
+	unsigned int bio_opf;
 	struct bio *bio;
 	bool need_zeroout = false;
 	bool use_fua = false;
@@ -251,8 +244,7 @@ static loff_t iomap_dio_bio_iter(const struct iomap_iter *iter,
 	size_t copied = 0;
 	size_t orig_count;
 
-	if ((pos | length) & (bdev_logical_block_size(iomap->bdev) - 1) ||
-	    !bdev_iter_is_aligned(iomap->bdev, dio->submit.iter))
+	if ((pos | length | align) & ((1 << blkbits) - 1))
 		return -EINVAL;
 
 	if (iomap->type == IOMAP_UNWRITTEN) {
@@ -274,7 +266,8 @@ static loff_t iomap_dio_bio_iter(const struct iomap_iter *iter,
 		 * cache flushes on IO completion.
 		 */
 		if (!(iomap->flags & (IOMAP_F_SHARED|IOMAP_F_DIRTY)) &&
-		    (dio->flags & IOMAP_DIO_WRITE_FUA) && bdev_fua(iomap->bdev))
+		    (dio->flags & IOMAP_DIO_WRITE_FUA) &&
+		    blk_queue_fua(bdev_get_queue(iomap->bdev)))
 			use_fua = true;
 	}
 
@@ -288,13 +281,6 @@ static loff_t iomap_dio_bio_iter(const struct iomap_iter *iter,
 
 	if (!iov_iter_count(dio->submit.iter))
 		goto out;
-
-	/*
-	 * We can only poll for single bio I/Os.
-	 */
-	if (need_zeroout ||
-	    ((dio->flags & IOMAP_DIO_WRITE) && pos >= i_size_read(inode)))
-		dio->iocb->ki_flags &= ~IOCB_HIPRI;
 
 	if (need_zeroout) {
 		/* zero out from the start of the block to the write offset */
@@ -319,13 +305,14 @@ static loff_t iomap_dio_bio_iter(const struct iomap_iter *iter,
 			goto out;
 		}
 
-		bio = iomap_dio_alloc_bio(iter, dio, nr_pages, bio_opf);
-		fscrypt_set_bio_crypt_ctx(bio, inode, pos >> inode->i_blkbits,
-					  GFP_KERNEL);
+		bio = bio_alloc(GFP_KERNEL, nr_pages);
+		bio_set_dev(bio, iomap->bdev);
 		bio->bi_iter.bi_sector = iomap_sector(iomap, pos);
+		bio->bi_write_hint = dio->iocb->ki_hint;
 		bio->bi_ioprio = dio->iocb->ki_ioprio;
 		bio->bi_private = dio;
 		bio->bi_end_io = iomap_dio_bio_end_io;
+		bio->bi_opf = bio_opf;
 
 		ret = bio_iov_iter_get_pages(bio, dio->submit.iter);
 		if (unlikely(ret)) {
@@ -352,11 +339,6 @@ static loff_t iomap_dio_bio_iter(const struct iomap_iter *iter,
 
 		nr_pages = bio_iov_vecs_to_alloc(dio->submit.iter,
 						 BIO_MAX_VECS);
-		/*
-		 * We can only poll for single bio I/Os.
-		 */
-		if (nr_pages)
-			dio->iocb->ki_flags &= ~IOCB_HIPRI;
 		iomap_dio_submit_bio(iter, dio, bio, pos);
 		pos += n;
 	} while (nr_pages);
@@ -389,8 +371,6 @@ static loff_t iomap_dio_hole_iter(const struct iomap_iter *iter,
 	loff_t length = iov_iter_zero(iomap_length(iter), dio->submit.iter);
 
 	dio->size += length;
-	if (!length)
-		return -EFAULT;
 	return length;
 }
 
@@ -422,8 +402,6 @@ static loff_t iomap_dio_inline_iter(const struct iomap_iter *iomi,
 		copied = copy_to_iter(inline_data, length, iter);
 	}
 	dio->size += copied;
-	if (!copied)
-		return -EFAULT;
 	return copied;
 }
 
@@ -468,21 +446,13 @@ static loff_t iomap_dio_iter(const struct iomap_iter *iter,
  * may be pure data writes. In that case, we still need to do a full data sync
  * completion.
  *
- * When page faults are disabled and @dio_flags includes IOMAP_DIO_PARTIAL,
- * __iomap_dio_rw can return a partial result if it encounters a non-resident
- * page in @iter after preparing a transfer.  In that case, the non-resident
- * pages can be faulted in and the request resumed with @done_before set to the
- * number of bytes previously transferred.  The request will then complete with
- * the correct total number of bytes transferred; this is essential for
- * completing partial requests asynchronously.
- *
  * Returns -ENOTBLK In case of a page invalidation invalidation failure for
  * writes.  The callers needs to fall back to buffered I/O in this case.
  */
 struct iomap_dio *
 __iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 		const struct iomap_ops *ops, const struct iomap_dio_ops *dops,
-		unsigned int dio_flags, void *private, size_t done_before)
+		unsigned int dio_flags)
 {
 	struct address_space *mapping = iocb->ki_filp->f_mapping;
 	struct inode *inode = file_inode(iocb->ki_filp);
@@ -491,7 +461,6 @@ __iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 		.pos		= iocb->ki_pos,
 		.len		= iov_iter_count(iter),
 		.flags		= IOMAP_DIRECT,
-		.private	= private,
 	};
 	loff_t end = iomi.pos + iomi.len - 1, ret = 0;
 	bool wait_for_completion =
@@ -513,11 +482,11 @@ __iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 	dio->dops = dops;
 	dio->error = 0;
 	dio->flags = 0;
-	dio->done_before = done_before;
 
 	dio->submit.iter = iter;
 	dio->submit.waiter = current;
-	dio->submit.poll_bio = NULL;
+	dio->submit.cookie = BLK_QC_T_NONE;
+	dio->submit.last_queue = NULL;
 
 	if (iov_iter_rw(iter) == READ) {
 		if (iomi.pos >= dio->i_size)
@@ -532,7 +501,7 @@ __iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 			iomi.flags |= IOMAP_NOWAIT;
 		}
 
-		if (user_backed_iter(iter))
+		if (iter_is_iovec(iter))
 			dio->flags |= IOMAP_DIO_DIRTY;
 	} else {
 		iomi.flags |= IOMAP_WRITE;
@@ -547,18 +516,17 @@ __iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 		}
 
 		/* for data sync or sync, we need sync completion processing */
-		if (iocb_is_dsync(iocb) && !(dio_flags & IOMAP_DIO_NOSYNC)) {
+		if (iocb->ki_flags & IOCB_DSYNC)
 			dio->flags |= IOMAP_DIO_NEED_SYNC;
 
-		       /*
-			* For datasync only writes, we optimistically try
-			* using FUA for this IO.  Any non-FUA write that
-			* occurs will clear this flag, hence we know before
-			* completion whether a cache flush is necessary.
-			*/
-			if (!(iocb->ki_flags & IOCB_SYNC))
-				dio->flags |= IOMAP_DIO_WRITE_FUA;
-		}
+		/*
+		 * For datasync only writes, we optimistically try using FUA for
+		 * this IO.  Any non-FUA write that occurs will clear this flag,
+		 * hence we know before completion whether a cache flush is
+		 * necessary.
+		 */
+		if ((iocb->ki_flags & (IOCB_DSYNC | IOCB_SYNC)) == IOCB_DSYNC)
+			dio->flags |= IOMAP_DIO_WRITE_FUA;
 	}
 
 	if (dio_flags & IOMAP_DIO_OVERWRITE_ONLY) {
@@ -597,15 +565,8 @@ __iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 	inode_dio_begin(inode);
 
 	blk_start_plug(&plug);
-	while ((ret = iomap_iter(&iomi, ops)) > 0) {
+	while ((ret = iomap_iter(&iomi, ops)) > 0)
 		iomi.processed = iomap_dio_iter(&iomi, dio);
-
-		/*
-		 * We can only poll for single bio I/Os.
-		 */
-		iocb->ki_flags &= ~IOCB_HIPRI;
-	}
-
 	blk_finish_plug(&plug);
 
 	/*
@@ -615,12 +576,6 @@ __iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 	 */
 	if (iov_iter_rw(iter) == READ && iomi.pos >= dio->i_size)
 		iov_iter_revert(iter, iomi.pos - dio->i_size);
-
-	if (ret == -EFAULT && dio->size && (dio_flags & IOMAP_DIO_PARTIAL)) {
-		if (!(iocb->ki_flags & IOCB_NOWAIT))
-			wait_for_completion = true;
-		ret = 0;
-	}
 
 	/* magic error code to fall back to buffered I/O */
 	if (ret == -ENOTBLK) {
@@ -637,7 +592,8 @@ __iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 	if (dio->flags & IOMAP_DIO_WRITE_FUA)
 		dio->flags &= ~IOMAP_DIO_NEED_SYNC;
 
-	WRITE_ONCE(iocb->private, dio->submit.poll_bio);
+	WRITE_ONCE(iocb->ki_cookie, dio->submit.cookie);
+	WRITE_ONCE(iocb->private, dio->submit.last_queue);
 
 	/*
 	 * We are about to drop our additional submission reference, which
@@ -664,7 +620,11 @@ __iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 			if (!READ_ONCE(dio->submit.waiter))
 				break;
 
-			blk_io_schedule();
+			if (!(iocb->ki_flags & IOCB_HIPRI) ||
+			    !dio->submit.last_queue ||
+			    !blk_poll(dio->submit.last_queue,
+					 dio->submit.cookie, true))
+				blk_io_schedule();
 		}
 		__set_current_state(TASK_RUNNING);
 	}
@@ -682,12 +642,11 @@ EXPORT_SYMBOL_GPL(__iomap_dio_rw);
 ssize_t
 iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 		const struct iomap_ops *ops, const struct iomap_dio_ops *dops,
-		unsigned int dio_flags, void *private, size_t done_before)
+		unsigned int dio_flags)
 {
 	struct iomap_dio *dio;
 
-	dio = __iomap_dio_rw(iocb, iter, ops, dops, dio_flags, private,
-			     done_before);
+	dio = __iomap_dio_rw(iocb, iter, ops, dops, dio_flags);
 	if (IS_ERR_OR_NULL(dio))
 		return PTR_ERR_OR_ZERO(dio);
 	return iomap_dio_complete(dio);

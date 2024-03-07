@@ -69,7 +69,7 @@ static int mx25_tsadc_setup_irq(struct platform_device *pdev,
 	int irq;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq <= 0)
 		return irq;
 
 	tsadc->domain = irq_domain_add_simple(np, 2, 0, &mx25_tsadc_domain_ops,
@@ -80,19 +80,6 @@ static int mx25_tsadc_setup_irq(struct platform_device *pdev,
 	}
 
 	irq_set_chained_handler_and_data(irq, mx25_tsadc_irq_handler, tsadc);
-
-	return 0;
-}
-
-static int mx25_tsadc_unset_irq(struct platform_device *pdev)
-{
-	struct mx25_tsadc *tsadc = platform_get_drvdata(pdev);
-	int irq = platform_get_irq(pdev, 0);
-
-	if (irq >= 0) {
-		irq_set_chained_handler_and_data(irq, NULL, NULL);
-		irq_domain_remove(tsadc->domain);
-	}
 
 	return 0;
 }
@@ -137,6 +124,7 @@ static int mx25_tsadc_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct mx25_tsadc *tsadc;
+	struct resource *res;
 	int ret;
 	void __iomem *iomem;
 
@@ -144,7 +132,8 @@ static int mx25_tsadc_probe(struct platform_device *pdev)
 	if (!tsadc)
 		return -ENOMEM;
 
-	iomem = devm_platform_get_and_ioremap_resource(pdev, 0, NULL);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	iomem = devm_ioremap_resource(dev, res);
 	if (IS_ERR(iomem))
 		return PTR_ERR(iomem);
 
@@ -182,21 +171,18 @@ static int mx25_tsadc_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, tsadc);
 
-	ret = devm_of_platform_populate(dev);
-	if (ret)
-		goto err_irq;
-
-	return 0;
-
-err_irq:
-	mx25_tsadc_unset_irq(pdev);
-
-	return ret;
+	return devm_of_platform_populate(dev);
 }
 
 static int mx25_tsadc_remove(struct platform_device *pdev)
 {
-	mx25_tsadc_unset_irq(pdev);
+	struct mx25_tsadc *tsadc = platform_get_drvdata(pdev);
+	int irq = platform_get_irq(pdev, 0);
+
+	if (irq) {
+		irq_set_chained_handler_and_data(irq, NULL, NULL);
+		irq_domain_remove(tsadc->domain);
+	}
 
 	return 0;
 }

@@ -184,7 +184,6 @@
  */
 
 #include <linux/anon_inodes.h>
-#include <linux/dma-fence-unwrap.h>
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/sched/signal.h>
@@ -858,7 +857,7 @@ static int drm_syncobj_transfer_to_timeline(struct drm_file *file_private,
 					    struct drm_syncobj_transfer *args)
 {
 	struct drm_syncobj *timeline_syncobj = NULL;
-	struct dma_fence *fence, *tmp;
+	struct dma_fence *fence;
 	struct dma_fence_chain *chain;
 	int ret;
 
@@ -868,27 +867,18 @@ static int drm_syncobj_transfer_to_timeline(struct drm_file *file_private,
 	}
 	ret = drm_syncobj_find_fence(file_private, args->src_handle,
 				     args->src_point, args->flags,
-				     &tmp);
+				     &fence);
 	if (ret)
-		goto err_put_timeline;
-
-	fence = dma_fence_unwrap_merge(tmp);
-	dma_fence_put(tmp);
-	if (!fence) {
-		ret = -ENOMEM;
-		goto err_put_timeline;
-	}
-
+		goto err;
 	chain = dma_fence_chain_alloc();
 	if (!chain) {
 		ret = -ENOMEM;
-		goto err_free_fence;
+		goto err1;
 	}
-
 	drm_syncobj_add_point(timeline_syncobj, chain, fence, args->dst_point);
-err_free_fence:
+err1:
 	dma_fence_put(fence);
-err_put_timeline:
+err:
 	drm_syncobj_put(timeline_syncobj);
 
 	return ret;

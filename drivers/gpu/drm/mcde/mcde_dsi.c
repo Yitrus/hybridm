@@ -1111,7 +1111,6 @@ static int mcde_dsi_bind(struct device *dev, struct device *master,
 			bridge = of_drm_find_bridge(child);
 			if (!bridge) {
 				dev_err(dev, "failed to find bridge\n");
-				of_node_put(child);
 				return -EINVAL;
 			}
 		}
@@ -1170,6 +1169,7 @@ static int mcde_dsi_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct mcde_dsi *d;
 	struct mipi_dsi_host *host;
+	struct resource *res;
 	u32 dsi_id;
 	int ret;
 
@@ -1187,7 +1187,8 @@ static int mcde_dsi_probe(struct platform_device *pdev)
 		return PTR_ERR(d->prcmu);
 	}
 
-	d->regs = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	d->regs = devm_ioremap_resource(dev, res);
 	if (IS_ERR(d->regs))
 		return PTR_ERR(d->regs);
 

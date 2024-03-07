@@ -221,11 +221,11 @@ struct mchp_spdifrx_user_data {
 };
 
 struct mchp_spdifrx_mixer_control {
-	struct mchp_spdifrx_ch_stat ch_stat[SPDIFRX_CHANNELS];
-	struct mchp_spdifrx_user_data user_data[SPDIFRX_CHANNELS];
-	bool ulock;
-	bool badf;
-	bool signal;
+		struct mchp_spdifrx_ch_stat ch_stat[SPDIFRX_CHANNELS];
+		struct mchp_spdifrx_user_data user_data[SPDIFRX_CHANNELS];
+		bool ulock;
+		bool badf;
+		bool signal;
 };
 
 struct mchp_spdifrx_dev {
@@ -288,17 +288,15 @@ static void mchp_spdifrx_isr_blockend_en(struct mchp_spdifrx_dev *dev)
 	spin_unlock_irqrestore(&dev->blockend_lock, flags);
 }
 
-/* called from atomic/non-atomic context */
+/* called from atomic context only */
 static void mchp_spdifrx_isr_blockend_dis(struct mchp_spdifrx_dev *dev)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&dev->blockend_lock, flags);
+	spin_lock(&dev->blockend_lock);
 	dev->blockend_refcount--;
 	/* don't enable BLOCKEND interrupt if it's already enabled */
 	if (dev->blockend_refcount == 0)
 		regmap_write(dev->regmap, SPDIFRX_IDR, SPDIFRX_IR_BLOCKEND);
-	spin_unlock_irqrestore(&dev->blockend_lock, flags);
+	spin_unlock(&dev->blockend_lock);
 }
 
 static irqreturn_t mchp_spdif_interrupt(int irq, void *dev_id)
@@ -577,7 +575,6 @@ static int mchp_spdifrx_subcode_ch_get(struct mchp_spdifrx_dev *dev,
 	if (ret <= 0) {
 		dev_dbg(dev->dev, "user data for channel %d timeout\n",
 			channel);
-		mchp_spdifrx_isr_blockend_dis(dev);
 		return ret;
 	}
 
@@ -849,8 +846,7 @@ static struct snd_soc_dai_driver mchp_spdifrx_dai = {
 };
 
 static const struct snd_soc_component_driver mchp_spdifrx_component = {
-	.name			= "mchp-spdifrx",
-	.legacy_dai_naming	= 1,
+	.name		= "mchp-spdifrx",
 };
 
 static const struct of_device_id mchp_spdifrx_dt_ids[] = {
@@ -924,7 +920,7 @@ static int mchp_spdifrx_probe(struct platform_device *pdev)
 
 	err = devm_snd_dmaengine_pcm_register(&pdev->dev, NULL, 0);
 	if (err) {
-		dev_err(&pdev->dev, "failed to register PCM: %d\n", err);
+		dev_err(&pdev->dev, "failed to register PMC: %d\n", err);
 		return err;
 	}
 

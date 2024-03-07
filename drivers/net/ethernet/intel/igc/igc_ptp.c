@@ -15,6 +15,7 @@
 #define INCVALUE_MASK		0x7fffffff
 #define ISGN			0x80000000
 
+#define IGC_SYSTIM_OVERFLOW_PERIOD	(HZ * 60 * 9)
 #define IGC_PTP_TX_TIMEOUT		(HZ * 15)
 
 #define IGC_PTM_STAT_SLEEP		2
@@ -322,7 +323,7 @@ static int igc_ptp_feature_enable_i225(struct ptp_clock_info *ptp,
 		ts = ns_to_timespec64(ns);
 		if (rq->perout.index == 1) {
 			if (use_freq) {
-				tsauxc_mask = IGC_TSAUXC_EN_CLK1 | IGC_TSAUXC_ST1;
+				tsauxc_mask = IGC_TSAUXC_EN_CLK1;
 				tsim_mask = 0;
 			} else {
 				tsauxc_mask = IGC_TSAUXC_EN_TT1;
@@ -333,7 +334,7 @@ static int igc_ptp_feature_enable_i225(struct ptp_clock_info *ptp,
 			freqout = IGC_FREQOUT1;
 		} else {
 			if (use_freq) {
-				tsauxc_mask = IGC_TSAUXC_EN_CLK0 | IGC_TSAUXC_ST0;
+				tsauxc_mask = IGC_TSAUXC_EN_CLK0;
 				tsim_mask = 0;
 			} else {
 				tsauxc_mask = IGC_TSAUXC_EN_TT0;
@@ -347,12 +348,10 @@ static int igc_ptp_feature_enable_i225(struct ptp_clock_info *ptp,
 		tsauxc = rd32(IGC_TSAUXC);
 		tsim = rd32(IGC_TSIM);
 		if (rq->perout.index == 1) {
-			tsauxc &= ~(IGC_TSAUXC_EN_TT1 | IGC_TSAUXC_EN_CLK1 |
-				    IGC_TSAUXC_ST1);
+			tsauxc &= ~(IGC_TSAUXC_EN_TT1 | IGC_TSAUXC_EN_CLK1);
 			tsim &= ~IGC_TSICR_TT1;
 		} else {
-			tsauxc &= ~(IGC_TSAUXC_EN_TT0 | IGC_TSAUXC_EN_CLK0 |
-				    IGC_TSAUXC_ST0);
+			tsauxc &= ~(IGC_TSAUXC_EN_TT0 | IGC_TSAUXC_EN_CLK0);
 			tsim &= ~IGC_TSICR_TT0;
 		}
 		if (on) {
@@ -417,12 +416,10 @@ static int igc_ptp_verify_pin(struct ptp_clock_info *ptp, unsigned int pin,
  *
  * We need to convert the system time value stored in the RX/TXSTMP registers
  * into a hwtstamp which can be used by the upper level timestamping functions.
- *
- * Returns 0 on success.
  **/
-static int igc_ptp_systim_to_hwtstamp(struct igc_adapter *adapter,
-				      struct skb_shared_hwtstamps *hwtstamps,
-				      u64 systim)
+static void igc_ptp_systim_to_hwtstamp(struct igc_adapter *adapter,
+				       struct skb_shared_hwtstamps *hwtstamps,
+				       u64 systim)
 {
 	switch (adapter->hw.mac.type) {
 	case igc_i225:
@@ -432,9 +429,8 @@ static int igc_ptp_systim_to_hwtstamp(struct igc_adapter *adapter,
 						systim & 0xFFFFFFFF);
 		break;
 	default:
-		return -EINVAL;
+		break;
 	}
-	return 0;
 }
 
 /**
@@ -564,6 +560,10 @@ static void igc_ptp_enable_tx_timestamp(struct igc_adapter *adapter)
 static int igc_ptp_set_timestamp_mode(struct igc_adapter *adapter,
 				      struct hwtstamp_config *config)
 {
+	/* reserved for future extensions */
+	if (config->flags)
+		return -EINVAL;
+
 	switch (config->tx_type) {
 	case HWTSTAMP_TX_OFF:
 		igc_ptp_disable_tx_timestamp(adapter);
@@ -655,8 +655,7 @@ static void igc_ptp_tx_hwtstamp(struct igc_adapter *adapter)
 
 	regval = rd32(IGC_TXSTMPL);
 	regval |= (u64)rd32(IGC_TXSTMPH) << 32;
-	if (igc_ptp_systim_to_hwtstamp(adapter, &shhwtstamps, regval))
-		return;
+	igc_ptp_systim_to_hwtstamp(adapter, &shhwtstamps, regval);
 
 	switch (adapter->link_speed) {
 	case SPEED_10:
@@ -997,17 +996,6 @@ static void igc_ptp_time_restore(struct igc_adapter *adapter)
 	igc_ptp_write_i225(adapter, &ts);
 }
 
-static void igc_ptm_stop(struct igc_adapter *adapter)
-{
-	struct igc_hw *hw = &adapter->hw;
-	u32 ctrl;
-
-	ctrl = rd32(IGC_PTM_CTRL);
-	ctrl &= ~IGC_PTM_CTRL_EN;
-
-	wr32(IGC_PTM_CTRL, ctrl);
-}
-
 /**
  * igc_ptp_suspend - Disable PTP work items and prepare for suspend
  * @adapter: Board private structure
@@ -1025,10 +1013,8 @@ void igc_ptp_suspend(struct igc_adapter *adapter)
 	adapter->ptp_tx_skb = NULL;
 	clear_bit_unlock(__IGC_PTP_TX_IN_PROGRESS, &adapter->state);
 
-	if (pci_device_is_present(adapter->pdev)) {
+	if (pci_device_is_present(adapter->pdev))
 		igc_ptp_time_save(adapter);
-		igc_ptm_stop(adapter);
-	}
 }
 
 /**

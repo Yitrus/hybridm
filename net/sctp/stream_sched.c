@@ -46,7 +46,7 @@ static int sctp_sched_fcfs_init_sid(struct sctp_stream *stream, __u16 sid,
 	return 0;
 }
 
-static void sctp_sched_fcfs_free_sid(struct sctp_stream *stream, __u16 sid)
+static void sctp_sched_fcfs_free(struct sctp_stream *stream)
 {
 }
 
@@ -96,7 +96,7 @@ static struct sctp_sched_ops sctp_sched_fcfs = {
 	.get = sctp_sched_fcfs_get,
 	.init = sctp_sched_fcfs_init,
 	.init_sid = sctp_sched_fcfs_init_sid,
-	.free_sid = sctp_sched_fcfs_free_sid,
+	.free = sctp_sched_fcfs_free,
 	.enqueue = sctp_sched_fcfs_enqueue,
 	.dequeue = sctp_sched_fcfs_dequeue,
 	.dequeue_done = sctp_sched_fcfs_dequeue_done,
@@ -126,23 +126,6 @@ void sctp_sched_ops_init(void)
 	sctp_sched_ops_rr_init();
 }
 
-static void sctp_sched_free_sched(struct sctp_stream *stream)
-{
-	struct sctp_sched_ops *sched = sctp_sched_ops_from_stream(stream);
-	struct sctp_stream_out_ext *soute;
-	int i;
-
-	sched->unsched_all(stream);
-	for (i = 0; i < stream->outcnt; i++) {
-		soute = SCTP_SO(stream, i)->ext;
-		if (!soute)
-			continue;
-		sched->free_sid(stream, i);
-		/* Give the next scheduler a clean slate. */
-		memset_after(soute, 0, outq);
-	}
-}
-
 int sctp_sched_set_sched(struct sctp_association *asoc,
 			 enum sctp_sched_type sched)
 {
@@ -158,8 +141,21 @@ int sctp_sched_set_sched(struct sctp_association *asoc,
 	if (sched > SCTP_SS_MAX)
 		return -EINVAL;
 
-	if (old)
-		sctp_sched_free_sched(&asoc->stream);
+	if (old) {
+		old->free(&asoc->stream);
+
+		/* Give the next scheduler a clean slate. */
+		for (i = 0; i < asoc->stream.outcnt; i++) {
+			void *p = SCTP_SO(&asoc->stream, i)->ext;
+
+			if (!p)
+				continue;
+
+			p += offsetofend(struct sctp_stream_out_ext, outq);
+			memset(p, 0, sizeof(struct sctp_stream_out_ext) -
+				     offsetofend(struct sctp_stream_out_ext, outq));
+		}
+	}
 
 	asoc->outqueue.sched = n;
 	n->init(&asoc->stream);
@@ -167,7 +163,7 @@ int sctp_sched_set_sched(struct sctp_association *asoc,
 		if (!SCTP_SO(&asoc->stream, i)->ext)
 			continue;
 
-		ret = n->init_sid(&asoc->stream, i, GFP_ATOMIC);
+		ret = n->init_sid(&asoc->stream, i, GFP_KERNEL);
 		if (ret)
 			goto err;
 	}
@@ -183,7 +179,7 @@ int sctp_sched_set_sched(struct sctp_association *asoc,
 	return ret;
 
 err:
-	sctp_sched_free_sched(&asoc->stream);
+	n->free(&asoc->stream);
 	asoc->outqueue.sched = &sctp_sched_fcfs; /* Always safe */
 
 	return ret;

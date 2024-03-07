@@ -80,7 +80,7 @@ static int optee_register_device(const uuid_t *device_uuid)
 	rc = device_register(&optee_device->dev);
 	if (rc) {
 		pr_err("device registration failed, err: %d\n", rc);
-		put_device(&optee_device->dev);
+		kfree(optee_device);
 	}
 
 	return rc;
@@ -121,9 +121,10 @@ static int __optee_enumerate_devices(u32 func)
 	if (rc < 0 || !shm_size)
 		goto out_sess;
 
-	device_shm = tee_shm_alloc_kernel_buf(ctx, shm_size);
+	device_shm = tee_shm_alloc(ctx, shm_size,
+				   TEE_SHM_MAPPED | TEE_SHM_DMA_BUF);
 	if (IS_ERR(device_shm)) {
-		pr_err("tee_shm_alloc_kernel_buf failed\n");
+		pr_err("tee_shm_alloc failed\n");
 		rc = PTR_ERR(device_shm);
 		goto out_sess;
 	}

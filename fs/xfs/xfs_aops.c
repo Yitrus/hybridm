@@ -17,8 +17,6 @@
 #include "xfs_bmap.h"
 #include "xfs_bmap_util.h"
 #include "xfs_reflink.h"
-#include "xfs_errortag.h"
-#include "xfs_error.h"
 
 struct xfs_writepage_ctx {
 	struct iomap_writepage_ctx ctx;
@@ -84,7 +82,6 @@ xfs_end_ioend(
 	struct iomap_ioend	*ioend)
 {
 	struct xfs_inode	*ip = XFS_I(ioend->io_inode);
-	struct xfs_mount	*mp = ip->i_mount;
 	xfs_off_t		offset = ioend->io_offset;
 	size_t			size = ioend->io_size;
 	unsigned int		nofs_flag;
@@ -100,25 +97,18 @@ xfs_end_ioend(
 	/*
 	 * Just clean up the in-memory structures if the fs has been shut down.
 	 */
-	if (xfs_is_shutdown(mp)) {
+	if (xfs_is_shutdown(ip->i_mount)) {
 		error = -EIO;
 		goto done;
 	}
 
 	/*
-	 * Clean up all COW blocks and underlying data fork delalloc blocks on
-	 * I/O error. The delalloc punch is required because this ioend was
-	 * mapped to blocks in the COW fork and the associated pages are no
-	 * longer dirty. If we don't remove delalloc blocks here, they become
-	 * stale and can corrupt free space accounting on unmount.
+	 * Clean up any COW blocks on an I/O error.
 	 */
 	error = blk_status_to_errno(ioend->io_bio->bi_status);
 	if (unlikely(error)) {
-		if (ioend->io_flags & IOMAP_F_SHARED) {
+		if (ioend->io_flags & IOMAP_F_SHARED)
 			xfs_reflink_cancel_cow_range(ip, offset, size, true);
-			xfs_bmap_punch_delalloc_range(ip, offset,
-					offset + size);
-		}
 		goto done;
 	}
 
@@ -137,20 +127,7 @@ done:
 	memalloc_nofs_restore(nofs_flag);
 }
 
-/*
- * Finish all pending IO completions that require transactional modifications.
- *
- * We try to merge physical and logically contiguous ioends before completion to
- * minimise the number of transactions we need to perform during IO completion.
- * Both unwritten extent conversion and COW remapping need to iterate and modify
- * one physical extent at a time, so we gain nothing by merging physically
- * discontiguous extents here.
- *
- * The ioend chain length that we can be processing here is largely unbound in
- * length and we may have to perform significant amounts of work on each ioend
- * to complete it. Hence we have to be careful about holding the CPU for too
- * long in this loop.
- */
+/* Finish all pending io completions. */
 void
 xfs_end_io(
 	struct work_struct	*work)
@@ -171,7 +148,6 @@ xfs_end_io(
 		list_del_init(&ioend->io_list);
 		iomap_ioend_try_merge(ioend, &tmp);
 		xfs_end_ioend(ioend);
-		cond_resched();
 	}
 }
 
@@ -219,17 +195,11 @@ xfs_imap_valid(
 	 * checked (and found nothing at this offset) could have added
 	 * overlapping blocks.
 	 */
-	if (XFS_WPC(wpc)->data_seq != READ_ONCE(ip->i_df.if_seq)) {
-		trace_xfs_wb_data_iomap_invalid(ip, &wpc->iomap,
-				XFS_WPC(wpc)->data_seq, XFS_DATA_FORK);
+	if (XFS_WPC(wpc)->data_seq != READ_ONCE(ip->i_df.if_seq))
 		return false;
-	}
 	if (xfs_inode_has_cow_data(ip) &&
-	    XFS_WPC(wpc)->cow_seq != READ_ONCE(ip->i_cowfp->if_seq)) {
-		trace_xfs_wb_cow_iomap_invalid(ip, &wpc->iomap,
-				XFS_WPC(wpc)->cow_seq, XFS_COW_FORK);
+	    XFS_WPC(wpc)->cow_seq != READ_ONCE(ip->i_cowfp->if_seq))
 		return false;
-	}
 	return true;
 }
 
@@ -292,8 +262,6 @@ xfs_map_blocks(
 
 	if (xfs_is_shutdown(mp))
 		return -EIO;
-
-	XFS_ERRORTAG_DELAY(mp, XFS_ERRTAG_WB_DELAY_MS);
 
 	/*
 	 * COW fork blocks can overlap data fork blocks even if the blocks
@@ -382,7 +350,7 @@ retry:
 	    isnullstartblock(imap.br_startblock))
 		goto allocate_blocks;
 
-	xfs_bmbt_to_iomap(ip, &wpc->iomap, &imap, 0, 0, XFS_WPC(wpc)->data_seq);
+	xfs_bmbt_to_iomap(ip, &wpc->iomap, &imap, 0);
 	trace_xfs_map_blocks_found(ip, offset, count, whichfork, &imap);
 	return 0;
 allocate_blocks:
@@ -460,32 +428,37 @@ xfs_prepare_ioend(
  * see a ENOSPC in writeback).
  */
 static void
-xfs_discard_folio(
-	struct folio		*folio,
-	loff_t			pos)
+xfs_discard_page(
+	struct page		*page,
+	loff_t			fileoff)
 {
-	struct xfs_inode	*ip = XFS_I(folio->mapping->host);
+	struct inode		*inode = page->mapping->host;
+	struct xfs_inode	*ip = XFS_I(inode);
 	struct xfs_mount	*mp = ip->i_mount;
+	unsigned int		pageoff = offset_in_page(fileoff);
+	xfs_fileoff_t		start_fsb = XFS_B_TO_FSBT(mp, fileoff);
+	xfs_fileoff_t		pageoff_fsb = XFS_B_TO_FSBT(mp, pageoff);
 	int			error;
 
 	if (xfs_is_shutdown(mp))
-		return;
+		goto out_invalidate;
 
 	xfs_alert_ratelimited(mp,
-		"page discard on page "PTR_FMT", inode 0x%llx, pos %llu.",
-			folio, ip->i_ino, pos);
+		"page discard on page "PTR_FMT", inode 0x%llx, offset %llu.",
+			page, ip->i_ino, fileoff);
 
-	error = xfs_bmap_punch_delalloc_range(ip, pos,
-			round_up(pos, folio_size(folio)));
-
+	error = xfs_bmap_punch_delalloc_range(ip, start_fsb,
+			i_blocks_per_page(inode, page) - pageoff_fsb);
 	if (error && !xfs_is_shutdown(mp))
 		xfs_alert(mp, "page discard unable to remove delalloc mapping.");
+out_invalidate:
+	iomap_invalidatepage(page, pageoff, PAGE_SIZE - pageoff);
 }
 
 static const struct iomap_writeback_ops xfs_writeback_ops = {
 	.map_blocks		= xfs_map_blocks,
 	.prepare_ioend		= xfs_prepare_ioend,
-	.discard_folio		= xfs_discard_folio,
+	.discard_page		= xfs_discard_page,
 };
 
 STATIC int
@@ -542,11 +515,11 @@ xfs_vm_bmap(
 }
 
 STATIC int
-xfs_vm_read_folio(
+xfs_vm_readpage(
 	struct file		*unused,
-	struct folio		*folio)
+	struct page		*page)
 {
-	return iomap_read_folio(folio, &xfs_read_iomap_ops);
+	return iomap_readpage(page, &xfs_read_iomap_ops);
 }
 
 STATIC void
@@ -568,15 +541,15 @@ xfs_iomap_swapfile_activate(
 }
 
 const struct address_space_operations xfs_address_space_operations = {
-	.read_folio		= xfs_vm_read_folio,
+	.readpage		= xfs_vm_readpage,
 	.readahead		= xfs_vm_readahead,
 	.writepages		= xfs_vm_writepages,
-	.dirty_folio		= filemap_dirty_folio,
-	.release_folio		= iomap_release_folio,
-	.invalidate_folio	= iomap_invalidate_folio,
+	.set_page_dirty		= __set_page_dirty_nobuffers,
+	.releasepage		= iomap_releasepage,
+	.invalidatepage		= iomap_invalidatepage,
 	.bmap			= xfs_vm_bmap,
 	.direct_IO		= noop_direct_IO,
-	.migrate_folio		= filemap_migrate_folio,
+	.migratepage		= iomap_migrate_page,
 	.is_partially_uptodate  = iomap_is_partially_uptodate,
 	.error_remove_page	= generic_error_remove_page,
 	.swap_activate		= xfs_iomap_swapfile_activate,
@@ -585,6 +558,7 @@ const struct address_space_operations xfs_address_space_operations = {
 const struct address_space_operations xfs_dax_aops = {
 	.writepages		= xfs_dax_writepages,
 	.direct_IO		= noop_direct_IO,
-	.dirty_folio		= noop_dirty_folio,
+	.set_page_dirty		= __set_page_dirty_no_writeback,
+	.invalidatepage		= noop_invalidatepage,
 	.swap_activate		= xfs_iomap_swapfile_activate,
 };

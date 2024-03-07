@@ -20,13 +20,11 @@
 #include <net/xfrm.h>
 #include <net/ip_tunnels.h>
 #include <net/ip6_tunnel.h>
-#include <net/dst_metadata.h>
 
 #include "xfrm_inout.h"
 
 struct xfrm_trans_tasklet {
-	struct work_struct work;
-	spinlock_t queue_lock;
+	struct tasklet_struct tasklet;
 	struct sk_buff_head queue;
 };
 
@@ -279,7 +277,8 @@ static int xfrm6_remove_tunnel_encap(struct xfrm_state *x, struct sk_buff *skb)
 		goto out;
 
 	if (x->props.flags & XFRM_STATE_DECAP_DSCP)
-		ipv6_copy_dscp(XFRM_MODE_SKB_CB(skb)->tos, ipipv6_hdr(skb));
+		ipv6_copy_dscp(ipv6_get_dsfield(ipv6_hdr(skb)),
+			       ipipv6_hdr(skb));
 	if (!(x->props.flags & XFRM_STATE_NOECN))
 		ipip6_ecn_decapsulate(skb);
 
@@ -531,7 +530,7 @@ int xfrm_input(struct sk_buff *skb, int nexthdr, __be32 spi, int encap_type)
 				goto drop;
 			}
 
-			if (xfrm_parse_spi(skb, nexthdr, &spi, &seq)) {
+			if ((err = xfrm_parse_spi(skb, nexthdr, &spi, &seq)) != 0) {
 				XFRM_INC_STATS(net, LINUX_MIB_XFRMINHDRERROR);
 				goto drop;
 			}
@@ -561,7 +560,7 @@ int xfrm_input(struct sk_buff *skb, int nexthdr, __be32 spi, int encap_type)
 	}
 
 	seq = 0;
-	if (!spi && xfrm_parse_spi(skb, nexthdr, &spi, &seq)) {
+	if (!spi && (err = xfrm_parse_spi(skb, nexthdr, &spi, &seq)) != 0) {
 		secpath_reset(skb);
 		XFRM_INC_STATS(net, LINUX_MIB_XFRMINHDRERROR);
 		goto drop;
@@ -670,7 +669,6 @@ resume:
 
 		x->curlft.bytes += skb->len;
 		x->curlft.packets++;
-		x->lastused = ktime_get_real_seconds();
 
 		spin_unlock(&x->lock);
 
@@ -721,8 +719,7 @@ resume:
 		sp = skb_sec_path(skb);
 		if (sp)
 			sp->olen = 0;
-		if (skb_valid_dst(skb))
-			skb_dst_drop(skb);
+		skb_dst_drop(skb);
 		gro_cells_receive(&gro_cells, skb);
 		return 0;
 	} else {
@@ -740,8 +737,7 @@ resume:
 			sp = skb_sec_path(skb);
 			if (sp)
 				sp->olen = 0;
-			if (skb_valid_dst(skb))
-				skb_dst_drop(skb);
+			skb_dst_drop(skb);
 			gro_cells_receive(&gro_cells, skb);
 			return err;
 		}
@@ -764,22 +760,18 @@ int xfrm_input_resume(struct sk_buff *skb, int nexthdr)
 }
 EXPORT_SYMBOL(xfrm_input_resume);
 
-static void xfrm_trans_reinject(struct work_struct *work)
+static void xfrm_trans_reinject(struct tasklet_struct *t)
 {
-	struct xfrm_trans_tasklet *trans = container_of(work, struct xfrm_trans_tasklet, work);
+	struct xfrm_trans_tasklet *trans = from_tasklet(trans, t, tasklet);
 	struct sk_buff_head queue;
 	struct sk_buff *skb;
 
 	__skb_queue_head_init(&queue);
-	spin_lock_bh(&trans->queue_lock);
 	skb_queue_splice_init(&trans->queue, &queue);
-	spin_unlock_bh(&trans->queue_lock);
 
-	local_bh_disable();
 	while ((skb = __skb_dequeue(&queue)))
 		XFRM_TRANS_SKB_CB(skb)->finish(XFRM_TRANS_SKB_CB(skb)->net,
 					       NULL, skb);
-	local_bh_enable();
 }
 
 int xfrm_trans_queue_net(struct net *net, struct sk_buff *skb,
@@ -790,17 +782,15 @@ int xfrm_trans_queue_net(struct net *net, struct sk_buff *skb,
 
 	trans = this_cpu_ptr(&xfrm_trans_tasklet);
 
-	if (skb_queue_len(&trans->queue) >= READ_ONCE(netdev_max_backlog))
+	if (skb_queue_len(&trans->queue) >= netdev_max_backlog)
 		return -ENOBUFS;
 
 	BUILD_BUG_ON(sizeof(struct xfrm_trans_cb) > sizeof(skb->cb));
 
 	XFRM_TRANS_SKB_CB(skb)->finish = finish;
 	XFRM_TRANS_SKB_CB(skb)->net = net;
-	spin_lock_bh(&trans->queue_lock);
 	__skb_queue_tail(&trans->queue, skb);
-	spin_unlock_bh(&trans->queue_lock);
-	schedule_work(&trans->work);
+	tasklet_schedule(&trans->tasklet);
 	return 0;
 }
 EXPORT_SYMBOL(xfrm_trans_queue_net);
@@ -827,8 +817,7 @@ void __init xfrm_input_init(void)
 		struct xfrm_trans_tasklet *trans;
 
 		trans = &per_cpu(xfrm_trans_tasklet, i);
-		spin_lock_init(&trans->queue_lock);
 		__skb_queue_head_init(&trans->queue);
-		INIT_WORK(&trans->work, xfrm_trans_reinject);
+		tasklet_setup(&trans->tasklet, xfrm_trans_reinject);
 	}
 }

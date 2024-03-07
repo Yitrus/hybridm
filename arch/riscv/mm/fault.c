@@ -31,7 +31,7 @@ static void die_kernel_fault(const char *msg, unsigned long addr,
 
 	bust_spinlocks(0);
 	die(regs, "Oops");
-	make_task_dead(SIGKILL);
+	do_exit(SIGKILL);
 }
 
 static inline void no_context(struct pt_regs *regs, unsigned long addr)
@@ -102,9 +102,9 @@ static inline void bad_area(struct pt_regs *regs, struct mm_struct *mm, int code
 static inline void vmalloc_fault(struct pt_regs *regs, int code, unsigned long addr)
 {
 	pgd_t *pgd, *pgd_k;
-	pud_t *pud_k;
-	p4d_t *p4d_k;
-	pmd_t *pmd_k;
+	pud_t *pud, *pud_k;
+	p4d_t *p4d, *p4d_k;
+	pmd_t *pmd, *pmd_k;
 	pte_t *pte_k;
 	int index;
 	unsigned long pfn;
@@ -132,12 +132,14 @@ static inline void vmalloc_fault(struct pt_regs *regs, int code, unsigned long a
 	}
 	set_pgd(pgd, *pgd_k);
 
+	p4d = p4d_offset(pgd, addr);
 	p4d_k = p4d_offset(pgd_k, addr);
 	if (!p4d_present(*p4d_k)) {
 		no_context(regs, addr);
 		return;
 	}
 
+	pud = pud_offset(p4d, addr);
 	pud_k = pud_offset(p4d_k, addr);
 	if (!pud_present(*pud_k)) {
 		no_context(regs, addr);
@@ -148,11 +150,13 @@ static inline void vmalloc_fault(struct pt_regs *regs, int code, unsigned long a
 	 * Since the vmalloc area is global, it is unnecessary
 	 * to copy individual PTEs
 	 */
+	pmd = pmd_offset(pud, addr);
 	pmd_k = pmd_offset(pud_k, addr);
 	if (!pmd_present(*pmd_k)) {
 		no_context(regs, addr);
 		return;
 	}
+	set_pmd(pmd, *pmd_k);
 
 	/*
 	 * Make sure the actual PTE exists as well to
@@ -184,8 +188,7 @@ static inline bool access_error(unsigned long cause, struct vm_area_struct *vma)
 		}
 		break;
 	case EXC_LOAD_PAGE_FAULT:
-		/* Write implies read */
-		if (!(vma->vm_flags & (VM_READ | VM_WRITE))) {
+		if (!(vma->vm_flags & VM_READ)) {
 			return true;
 		}
 		break;
@@ -232,7 +235,7 @@ asmlinkage void do_page_fault(struct pt_regs *regs)
 	 * only copy the information from the master page table,
 	 * nothing more.
 	 */
-	if (unlikely((addr >= VMALLOC_START) && (addr < VMALLOC_END))) {
+	if (unlikely((addr >= VMALLOC_START) && (addr <= VMALLOC_END))) {
 		vmalloc_fault(regs, code, addr);
 		return;
 	}
@@ -327,11 +330,7 @@ good_area:
 	if (fault_signal_pending(fault, regs))
 		return;
 
-	/* The fault is fully completed (including releasing mmap lock) */
-	if (fault & VM_FAULT_COMPLETED)
-		return;
-
-	if (unlikely(fault & VM_FAULT_RETRY)) {
+	if (unlikely((fault & VM_FAULT_RETRY) && (flags & FAULT_FLAG_ALLOW_RETRY))) {
 		flags |= FAULT_FLAG_TRIED;
 
 		/*

@@ -49,15 +49,13 @@ struct visconti_eth {
 	void __iomem *reg;
 	u32 phy_intf_sel;
 	struct clk *phy_ref_clk;
-	struct device *dev;
 	spinlock_t lock; /* lock to protect register update */
 };
 
 static void visconti_eth_fix_mac_speed(void *priv, unsigned int speed)
 {
 	struct visconti_eth *dwmac = priv;
-	struct net_device *netdev = dev_get_drvdata(dwmac->dev);
-	unsigned int val, clk_sel_val = 0;
+	unsigned int val, clk_sel_val;
 	unsigned long flags;
 
 	spin_lock_irqsave(&dwmac->lock, flags);
@@ -87,9 +85,7 @@ static void visconti_eth_fix_mac_speed(void *priv, unsigned int speed)
 		break;
 	default:
 		/* No bit control */
-		netdev_err(netdev, "Unsupported speed request (%d)", speed);
-		spin_unlock_irqrestore(&dwmac->lock, flags);
-		return;
+		break;
 	}
 
 	writel(val, dwmac->reg + MAC_CTRL_REG);
@@ -185,9 +181,10 @@ static int visconti_eth_clock_probe(struct platform_device *pdev,
 	int err;
 
 	dwmac->phy_ref_clk = devm_clk_get(&pdev->dev, "phy_ref_clk");
-	if (IS_ERR(dwmac->phy_ref_clk))
-		return dev_err_probe(&pdev->dev, PTR_ERR(dwmac->phy_ref_clk),
-				     "phy_ref_clk clock not found.\n");
+	if (IS_ERR(dwmac->phy_ref_clk)) {
+		dev_err(&pdev->dev, "phy_ref_clk clock not found.\n");
+		return PTR_ERR(dwmac->phy_ref_clk);
+	}
 
 	err = clk_prepare_enable(dwmac->phy_ref_clk);
 	if (err < 0) {
@@ -233,7 +230,6 @@ static int visconti_eth_dwmac_probe(struct platform_device *pdev)
 
 	spin_lock_init(&dwmac->lock);
 	dwmac->reg = stmmac_res.addr;
-	dwmac->dev = &pdev->dev;
 	plat_dat->bsp_priv = dwmac;
 	plat_dat->fix_mac_speed = visconti_eth_fix_mac_speed;
 

@@ -1318,11 +1318,11 @@ anybuss_host_common_probe(struct device *dev,
 	}
 	/*
 	 * startup sequence:
-	 *   a) perform dummy IND_AB read to prevent false 'init done' irq
+	 *   perform dummy IND_AB read to prevent false 'init done' irq
 	 *     (already done by test_dpram() above)
-	 *   b) release reset
-	 *   c) wait for first interrupt
-	 *   d) interrupt came in: ready to go !
+	 *   release reset
+	 *   wait for first interrupt
+	 *   interrupt came in: ready to go !
 	 */
 	reset_deassert(cd);
 	if (!wait_for_completion_timeout(&cd->card_boot, TIMEOUT)) {
@@ -1384,7 +1384,7 @@ anybuss_host_common_probe(struct device *dev,
 		goto err_device;
 	return cd;
 err_device:
-	put_device(&cd->client->dev);
+	device_unregister(&cd->client->dev);
 err_kthread:
 	kthread_stop(cd->qthread);
 err_reset:

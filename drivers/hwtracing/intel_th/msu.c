@@ -658,11 +658,13 @@ static void msc_buffer_clear_hw_header(struct msc *msc)
 
 	list_for_each_entry(win, &msc->win_list, entry) {
 		unsigned int blk;
+		size_t hw_sz = sizeof(struct msc_block_desc) -
+			offsetof(struct msc_block_desc, hw_tag);
 
 		for_each_sg(win->sgt->sgl, sg, win->nr_segs, blk) {
 			struct msc_block_desc *bdesc = sg_virt(sg);
 
-			memset_startat(bdesc, 0, hw_tag);
+			memset(&bdesc->hw_tag, 0, hw_sz);
 		}
 	}
 }
@@ -1067,16 +1069,6 @@ msc_buffer_set_uc(struct msc *msc) {}
 static inline void msc_buffer_set_wb(struct msc *msc) {}
 #endif /* CONFIG_X86 */
 
-static struct page *msc_sg_page(struct scatterlist *sg)
-{
-	void *addr = sg_virt(sg);
-
-	if (is_vmalloc_addr(addr))
-		return vmalloc_to_page(addr);
-
-	return sg_page(sg);
-}
-
 /**
  * msc_buffer_win_alloc() - alloc a window for a multiblock mode
  * @msc:	MSC device
@@ -1147,7 +1139,7 @@ static void __msc_buffer_win_free(struct msc *msc, struct msc_window *win)
 	int i;
 
 	for_each_sg(win->sgt->sgl, sg, win->nr_segs, i) {
-		struct page *page = msc_sg_page(sg);
+		struct page *page = sg_page(sg);
 
 		page->mapping = NULL;
 		dma_free_coherent(msc_dev(win->msc)->parent->parent, PAGE_SIZE,
@@ -1411,7 +1403,7 @@ found:
 	pgoff -= win->pgoff;
 
 	for_each_sg(win->sgt->sgl, sg, win->nr_segs, blk) {
-		struct page *page = msc_sg_page(sg);
+		struct page *page = sg_page(sg);
 		size_t pgsz = PFN_DOWN(sg->length);
 
 		if (pgoff < pgsz)

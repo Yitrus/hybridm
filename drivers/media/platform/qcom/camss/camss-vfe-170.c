@@ -177,7 +177,7 @@
 #define VFE_BUS_WM_FRAME_INC(n)			(0x2258 + (n) * 0x100)
 #define VFE_BUS_WM_BURST_LIMIT(n)		(0x225c + (n) * 0x100)
 
-static u32 vfe_hw_version(struct vfe_device *vfe)
+static void vfe_hw_version_read(struct vfe_device *vfe, struct device *dev)
 {
 	u32 hw_version = readl_relaxed(vfe->base + VFE_HW_VERSION);
 
@@ -185,10 +185,14 @@ static u32 vfe_hw_version(struct vfe_device *vfe)
 	u32 rev = (hw_version >> 16) & 0xFFF;
 	u32 step = hw_version & 0xFFFF;
 
-	dev_dbg(vfe->camss->dev, "VFE HW Version = %u.%u.%u\n",
-		gen, rev, step);
+	dev_err(dev, "VFE HW Version = %u.%u.%u\n", gen, rev, step);
+}
 
-	return hw_version;
+static inline void vfe_reg_clr(struct vfe_device *vfe, u32 reg, u32 clr_bits)
+{
+	u32 bits = readl_relaxed(vfe->base + reg);
+
+	writel_relaxed(bits & ~clr_bits, vfe->base + reg);
 }
 
 static inline void vfe_reg_set(struct vfe_device *vfe, u32 reg, u32 set_bits)
@@ -395,7 +399,17 @@ static irqreturn_t vfe_isr(int irq, void *dev)
  */
 static int vfe_halt(struct vfe_device *vfe)
 {
-	/* rely on vfe_disable_output() to stop the VFE */
+	unsigned long time;
+
+	reinit_completion(&vfe->halt_complete);
+
+	time = wait_for_completion_timeout(&vfe->halt_complete,
+					   msecs_to_jiffies(VFE_HALT_TIMEOUT_MS));
+	if (!time) {
+		dev_err(vfe->camss->dev, "VFE halt timeout\n");
+		return -EIO;
+	}
+
 	return 0;
 }
 
@@ -687,12 +701,7 @@ out_unlock:
  */
 static void vfe_pm_domain_off(struct vfe_device *vfe)
 {
-	struct camss *camss = vfe->camss;
-
-	if (vfe->id >= camss->vfe_num)
-		return;
-
-	device_link_del(camss->genpd_link[vfe->id]);
+	/* nop */
 }
 
 /*
@@ -701,19 +710,6 @@ static void vfe_pm_domain_off(struct vfe_device *vfe)
  */
 static int vfe_pm_domain_on(struct vfe_device *vfe)
 {
-	struct camss *camss = vfe->camss;
-	enum vfe_line_id id = vfe->id;
-
-	if (id >= camss->vfe_num)
-		return 0;
-
-	camss->genpd_link[id] = device_link_add(camss->dev, camss->genpd[id],
-						DL_FLAG_STATELESS |
-						DL_FLAG_PM_RUNTIME |
-						DL_FLAG_RPM_ACTIVE);
-	if (!camss->genpd_link[id])
-		return -EINVAL;
-
 	return 0;
 }
 
@@ -775,7 +771,7 @@ static void vfe_subdev_init(struct device *dev, struct vfe_device *vfe)
 
 const struct vfe_hw_ops vfe_ops_170 = {
 	.global_reset = vfe_global_reset,
-	.hw_version = vfe_hw_version,
+	.hw_version_read = vfe_hw_version_read,
 	.isr_read = vfe_isr_read,
 	.isr = vfe_isr,
 	.pm_domain_off = vfe_pm_domain_off,

@@ -14,7 +14,6 @@
  */
 
 #include <linux/linkage.h>
-#include <linux/cfi_types.h>
 #include <asm/frame.h>
 
 #define rRIP         (%rip)
@@ -140,11 +139,13 @@
 
 
 .text
+.align 16
 
 /*
  * void sm4_aesni_avx_crypt4(const u32 *rk, u8 *dst,
  *                           const u8 *src, int nblocks)
  */
+.align 8
 SYM_FUNC_START(sm4_aesni_avx_crypt4)
 	/* input:
 	 *	%rdi: round key array, CTX
@@ -245,9 +246,10 @@ SYM_FUNC_START(sm4_aesni_avx_crypt4)
 .Lblk4_store_output_done:
 	vzeroall;
 	FRAME_END
-	RET;
+	ret;
 SYM_FUNC_END(sm4_aesni_avx_crypt4)
 
+.align 8
 SYM_FUNC_START_LOCAL(__sm4_crypt_blk8)
 	/* input:
 	 *	%rdi: round key array, CTX
@@ -354,13 +356,14 @@ SYM_FUNC_START_LOCAL(__sm4_crypt_blk8)
 	vpshufb RTMP2, RB3, RB3;
 
 	FRAME_END
-	RET;
+	ret;
 SYM_FUNC_END(__sm4_crypt_blk8)
 
 /*
  * void sm4_aesni_avx_crypt8(const u32 *rk, u8 *dst,
  *                           const u8 *src, int nblocks)
  */
+.align 8
 SYM_FUNC_START(sm4_aesni_avx_crypt8)
 	/* input:
 	 *	%rdi: round key array, CTX
@@ -409,14 +412,15 @@ SYM_FUNC_START(sm4_aesni_avx_crypt8)
 .Lblk8_store_output_done:
 	vzeroall;
 	FRAME_END
-	RET;
+	ret;
 SYM_FUNC_END(sm4_aesni_avx_crypt8)
 
 /*
  * void sm4_aesni_avx_ctr_enc_blk8(const u32 *rk, u8 *dst,
  *                                 const u8 *src, u8 *iv)
  */
-SYM_TYPED_FUNC_START(sm4_aesni_avx_ctr_enc_blk8)
+.align 8
+SYM_FUNC_START(sm4_aesni_avx_ctr_enc_blk8)
 	/* input:
 	 *	%rdi: round key array, CTX
 	 *	%rsi: dst (8 blocks)
@@ -483,14 +487,15 @@ SYM_TYPED_FUNC_START(sm4_aesni_avx_ctr_enc_blk8)
 
 	vzeroall;
 	FRAME_END
-	RET;
+	ret;
 SYM_FUNC_END(sm4_aesni_avx_ctr_enc_blk8)
 
 /*
  * void sm4_aesni_avx_cbc_dec_blk8(const u32 *rk, u8 *dst,
  *                                 const u8 *src, u8 *iv)
  */
-SYM_TYPED_FUNC_START(sm4_aesni_avx_cbc_dec_blk8)
+.align 8
+SYM_FUNC_START(sm4_aesni_avx_cbc_dec_blk8)
 	/* input:
 	 *	%rdi: round key array, CTX
 	 *	%rsi: dst (8 blocks)
@@ -532,14 +537,15 @@ SYM_TYPED_FUNC_START(sm4_aesni_avx_cbc_dec_blk8)
 
 	vzeroall;
 	FRAME_END
-	RET;
+	ret;
 SYM_FUNC_END(sm4_aesni_avx_cbc_dec_blk8)
 
 /*
  * void sm4_aesni_avx_cfb_dec_blk8(const u32 *rk, u8 *dst,
  *                                 const u8 *src, u8 *iv)
  */
-SYM_TYPED_FUNC_START(sm4_aesni_avx_cfb_dec_blk8)
+.align 8
+SYM_FUNC_START(sm4_aesni_avx_cfb_dec_blk8)
 	/* input:
 	 *	%rdi: round key array, CTX
 	 *	%rsi: dst (8 blocks)
@@ -584,5 +590,5 @@ SYM_TYPED_FUNC_START(sm4_aesni_avx_cfb_dec_blk8)
 
 	vzeroall;
 	FRAME_END
-	RET;
+	ret;
 SYM_FUNC_END(sm4_aesni_avx_cfb_dec_blk8)

@@ -111,11 +111,21 @@ static void pty_unthrottle(struct tty_struct *tty)
 static int pty_write(struct tty_struct *tty, const unsigned char *buf, int c)
 {
 	struct tty_struct *to = tty->link;
+	unsigned long flags;
 
-	if (tty->flow.stopped || !c)
+	if (tty->flow.stopped)
 		return 0;
 
-	return tty_insert_flip_string_and_push_buffer(to->port, buf, c);
+	if (c > 0) {
+		spin_lock_irqsave(&to->port->lock, flags);
+		/* Stuff the data into the input queue of the other end */
+		c = tty_insert_flip_string(to->port, buf, c);
+		spin_unlock_irqrestore(&to->port->lock, flags);
+		/* And shovel */
+		if (c)
+			tty_flip_buffer_push(to->port);
+	}
+	return c;
 }
 
 /**
@@ -240,7 +250,7 @@ out:
 }
 
 static void pty_set_termios(struct tty_struct *tty,
-			    const struct ktermios *old_termios)
+					struct ktermios *old_termios)
 {
 	/* See if packet mode change of state. */
 	if (tty->link && tty->link->ctrl.packet) {

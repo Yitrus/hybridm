@@ -425,7 +425,9 @@ static int brcmuart_tx_dma(struct uart_8250_port *p)
 
 	priv->dma.tx_err = 0;
 	memcpy(priv->tx_buf, &xmit->buf[xmit->tail], tx_size);
-	uart_xmit_advance(&p->port, tx_size);
+	xmit->tail += tx_size;
+	xmit->tail &= UART_XMIT_SIZE - 1;
+	p->port.icount.tx += tx_size;
 
 	if (uart_circ_chars_pending(xmit) < WAKEUP_CHARS)
 		uart_write_wakeup(&p->port);
@@ -753,7 +755,7 @@ static void set_clock_mux(struct uart_port *up, struct brcmuart_priv *priv,
 
 static void brcmstb_set_termios(struct uart_port *up,
 				struct ktermios *termios,
-				const struct ktermios *old)
+				struct ktermios *old)
 {
 	struct uart_8250_port *p8250 = up_to_u8250p(up);
 	struct brcmuart_priv *priv = up->private_data;
@@ -939,7 +941,7 @@ static int brcmuart_probe(struct platform_device *pdev)
 	struct brcmuart_priv *priv;
 	struct clk *baud_mux_clk;
 	struct uart_8250_port up;
-	int irq;
+	struct resource *irq;
 	void __iomem *membase = NULL;
 	resource_size_t mapbase = 0;
 	u32 clk_rate = 0;
@@ -950,9 +952,11 @@ static int brcmuart_probe(struct platform_device *pdev)
 		"uart", "dma_rx", "dma_tx", "dma_intr2", "dma_arb"
 	};
 
-	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
-		return irq;
+	irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
+	if (!irq) {
+		dev_err(dev, "missing irq\n");
+		return -EINVAL;
+	}
 	priv = devm_kzalloc(dev, sizeof(struct brcmuart_priv),
 			GFP_KERNEL);
 	if (!priv)
@@ -1040,7 +1044,7 @@ static int brcmuart_probe(struct platform_device *pdev)
 	up.port.dev = dev;
 	up.port.mapbase = mapbase;
 	up.port.membase = membase;
-	up.port.irq = irq;
+	up.port.irq = irq->start;
 	up.port.handle_irq = brcmuart_handle_irq;
 	up.port.regshift = 2;
 	up.port.iotype = of_device_is_big_endian(np) ?
@@ -1073,7 +1077,7 @@ static int brcmuart_probe(struct platform_device *pdev)
 						   priv->rx_size,
 						   &priv->rx_addr, GFP_KERNEL);
 		if (!priv->rx_bufs) {
-			ret = -ENOMEM;
+			ret = -EINVAL;
 			goto err;
 		}
 		priv->tx_size = UART_XMIT_SIZE;
@@ -1081,7 +1085,7 @@ static int brcmuart_probe(struct platform_device *pdev)
 						  priv->tx_size,
 						  &priv->tx_addr, GFP_KERNEL);
 		if (!priv->tx_buf) {
-			ret = -ENOMEM;
+			ret = -EINVAL;
 			goto err;
 		}
 	}
@@ -1137,19 +1141,16 @@ static int __maybe_unused brcmuart_suspend(struct device *dev)
 	struct brcmuart_priv *priv = dev_get_drvdata(dev);
 	struct uart_8250_port *up = serial8250_get_port(priv->line);
 	struct uart_port *port = &up->port;
-	unsigned long flags;
-
-	/*
-	 * This will prevent resume from enabling RTS before the
-	 *  baud rate has been restored.
-	 */
-	spin_lock_irqsave(&port->lock, flags);
-	priv->saved_mctrl = port->mctrl;
-	port->mctrl &= ~TIOCM_RTS;
-	spin_unlock_irqrestore(&port->lock, flags);
 
 	serial8250_suspend_port(priv->line);
 	clk_disable_unprepare(priv->baud_mux_clk);
+
+	/*
+	 * This will prevent resume from enabling RTS before the
+	 *  baud rate has been resored.
+	 */
+	priv->saved_mctrl = port->mctrl;
+	port->mctrl = 0;
 
 	return 0;
 }
@@ -1159,7 +1160,6 @@ static int __maybe_unused brcmuart_resume(struct device *dev)
 	struct brcmuart_priv *priv = dev_get_drvdata(dev);
 	struct uart_8250_port *up = serial8250_get_port(priv->line);
 	struct uart_port *port = &up->port;
-	unsigned long flags;
 	int ret;
 
 	ret = clk_prepare_enable(priv->baud_mux_clk);
@@ -1182,15 +1182,7 @@ static int __maybe_unused brcmuart_resume(struct device *dev)
 		start_rx_dma(serial8250_get_port(priv->line));
 	}
 	serial8250_resume_port(priv->line);
-
-	if (priv->saved_mctrl & TIOCM_RTS) {
-		/* Restore RTS */
-		spin_lock_irqsave(&port->lock, flags);
-		port->mctrl |= TIOCM_RTS;
-		port->ops->set_mctrl(port, port->mctrl);
-		spin_unlock_irqrestore(&port->lock, flags);
-	}
-
+	port->mctrl = priv->saved_mctrl;
 	return 0;
 }
 
@@ -1210,17 +1202,9 @@ static struct platform_driver brcmuart_platform_driver = {
 
 static int __init brcmuart_init(void)
 {
-	int ret;
-
 	brcmuart_debugfs_root = debugfs_create_dir(
 		brcmuart_platform_driver.driver.name, NULL);
-	ret = platform_driver_register(&brcmuart_platform_driver);
-	if (ret) {
-		debugfs_remove_recursive(brcmuart_debugfs_root);
-		return ret;
-	}
-
-	return 0;
+	return platform_driver_register(&brcmuart_platform_driver);
 }
 module_init(brcmuart_init);
 

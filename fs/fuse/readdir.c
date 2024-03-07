@@ -76,13 +76,11 @@ static void fuse_add_dirent_to_cache(struct file *file,
 	    WARN_ON(fi->rdc.pos != pos))
 		goto unlock;
 
-	addr = kmap_local_page(page);
-	if (!offset) {
+	addr = kmap_atomic(page);
+	if (!offset)
 		clear_page(addr);
-		SetPageUptodate(page);
-	}
 	memcpy(addr + offset, dirent, reclen);
-	kunmap_local(addr);
+	kunmap_atomic(addr);
 	fi->rdc.size = (index << PAGE_SHIFT) + offset + reclen;
 	fi->rdc.pos = dirent->off;
 unlock:
@@ -456,7 +454,7 @@ static int fuse_readdir_cached(struct file *file, struct dir_context *ctx)
 	 * cache; both cases require an up-to-date mtime value.
 	 */
 	if (!ctx->pos && fc->auto_inval_data) {
-		int err = fuse_update_attributes(inode, file, STATX_MTIME);
+		int err = fuse_update_attributes(inode, file);
 
 		if (err)
 			return err;
@@ -518,12 +516,6 @@ retry_locked:
 
 	page = find_get_page_flags(file->f_mapping, index,
 				   FGP_ACCESSED | FGP_LOCK);
-	/* Page gone missing, then re-added to cache, but not initialized? */
-	if (page && !PageUptodate(page)) {
-		unlock_page(page);
-		put_page(page);
-		page = NULL;
-	}
 	spin_lock(&fi->rdc.lock);
 	if (!page) {
 		/*
@@ -547,9 +539,9 @@ retry_locked:
 	 * Contents of the page are now protected against changing by holding
 	 * the page lock.
 	 */
-	addr = kmap_local_page(page);
+	addr = kmap(page);
 	res = fuse_parse_cache(ff, addr, size, ctx);
-	kunmap_local(addr);
+	kunmap(page);
 	unlock_page(page);
 	put_page(page);
 

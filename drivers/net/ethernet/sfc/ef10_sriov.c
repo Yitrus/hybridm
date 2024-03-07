@@ -408,9 +408,8 @@ fail1:
 static int efx_ef10_pci_sriov_disable(struct efx_nic *efx, bool force)
 {
 	struct pci_dev *dev = efx->pci_dev;
-	struct efx_ef10_nic_data *nic_data = efx->nic_data;
 	unsigned int vfs_assigned = pci_vfs_assigned(dev);
-	int i, rc = 0;
+	int rc = 0;
 
 	if (vfs_assigned && !force) {
 		netif_info(efx, drv, efx->net_dev, "VFs are assigned to guests; "
@@ -418,13 +417,10 @@ static int efx_ef10_pci_sriov_disable(struct efx_nic *efx, bool force)
 		return -EBUSY;
 	}
 
-	if (!vfs_assigned) {
-		for (i = 0; i < efx->vf_count; i++)
-			nic_data->vf[i].pci_dev = NULL;
+	if (!vfs_assigned)
 		pci_disable_sriov(dev);
-	} else {
+	else
 		rc = -EBUSY;
-	}
 
 	efx_ef10_sriov_free_vf_vswitching(efx);
 	efx->vf_count = 0;
@@ -484,7 +480,7 @@ static int efx_ef10_vport_del_vf_mac(struct efx_nic *efx, unsigned int port_id,
 	return rc;
 }
 
-int efx_ef10_sriov_set_vf_mac(struct efx_nic *efx, int vf_i, const u8 *mac)
+int efx_ef10_sriov_set_vf_mac(struct efx_nic *efx, int vf_i, u8 *mac)
 {
 	struct efx_ef10_nic_data *nic_data = efx->nic_data;
 	struct ef10_vf *vf;
@@ -501,11 +497,14 @@ int efx_ef10_sriov_set_vf_mac(struct efx_nic *efx, int vf_i, const u8 *mac)
 		efx_device_detach_sync(vf->efx);
 		efx_net_stop(vf->efx->net_dev);
 
+		down_write(&vf->efx->filter_sem);
 		vf->efx->type->filter_table_remove(vf->efx);
 
 		rc = efx_ef10_vadaptor_free(vf->efx, EVB_PORT_ID_ASSIGNED);
-		if (rc)
+		if (rc) {
+			up_write(&vf->efx->filter_sem);
 			return rc;
+		}
 	}
 
 	rc = efx_ef10_evb_port_assign(efx, EVB_PORT_ID_NULL, vf_i);
@@ -524,7 +523,7 @@ int efx_ef10_sriov_set_vf_mac(struct efx_nic *efx, int vf_i, const u8 *mac)
 			goto fail;
 
 		if (vf->efx)
-			eth_hw_addr_set(vf->efx->net_dev, mac);
+			ether_addr_copy(vf->efx->net_dev->dev_addr, mac);
 	}
 
 	ether_addr_copy(vf->mac, mac);
@@ -536,9 +535,12 @@ int efx_ef10_sriov_set_vf_mac(struct efx_nic *efx, int vf_i, const u8 *mac)
 	if (vf->efx) {
 		/* VF cannot use the vport_id that the PF created */
 		rc = efx_ef10_vadaptor_alloc(vf->efx, EVB_PORT_ID_ASSIGNED);
-		if (rc)
+		if (rc) {
+			up_write(&vf->efx->filter_sem);
 			return rc;
+		}
 		vf->efx->type->filter_table_probe(vf->efx);
+		up_write(&vf->efx->filter_sem);
 		efx_net_open(vf->efx->net_dev);
 		efx_device_attach_if_not_resetting(vf->efx);
 	}
@@ -574,6 +576,7 @@ int efx_ef10_sriov_set_vf_vlan(struct efx_nic *efx, int vf_i, u16 vlan,
 		efx_net_stop(vf->efx->net_dev);
 
 		mutex_lock(&vf->efx->mac_lock);
+		down_write(&vf->efx->filter_sem);
 		vf->efx->type->filter_table_remove(vf->efx);
 
 		rc = efx_ef10_vadaptor_free(vf->efx, EVB_PORT_ID_ASSIGNED);
@@ -647,6 +650,7 @@ restore_filters:
 		if (rc2)
 			goto reset_nic_up_write;
 
+		up_write(&vf->efx->filter_sem);
 		mutex_unlock(&vf->efx->mac_lock);
 
 		rc2 = efx_net_open(vf->efx->net_dev);
@@ -658,8 +662,10 @@ restore_filters:
 	return rc;
 
 reset_nic_up_write:
-	if (vf->efx)
+	if (vf->efx) {
+		up_write(&vf->efx->filter_sem);
 		mutex_unlock(&vf->efx->mac_lock);
+	}
 reset_nic:
 	if (vf->efx) {
 		netif_err(efx, drv, efx->net_dev,

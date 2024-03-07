@@ -159,14 +159,18 @@ static int vsc73xx_spi_probe(struct spi_device *spi)
 	return vsc73xx_probe(&vsc_spi->vsc);
 }
 
-static void vsc73xx_spi_remove(struct spi_device *spi)
+static int vsc73xx_spi_remove(struct spi_device *spi)
 {
 	struct vsc73xx_spi *vsc_spi = spi_get_drvdata(spi);
 
 	if (!vsc_spi)
-		return;
+		return 0;
 
 	vsc73xx_remove(&vsc_spi->vsc);
+
+	spi_set_drvdata(spi, NULL);
+
+	return 0;
 }
 
 static void vsc73xx_spi_shutdown(struct spi_device *spi)
@@ -203,20 +207,10 @@ static const struct of_device_id vsc73xx_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, vsc73xx_of_match);
 
-static const struct spi_device_id vsc73xx_spi_ids[] = {
-	{ "vsc7385" },
-	{ "vsc7388" },
-	{ "vsc7395" },
-	{ "vsc7398" },
-	{ },
-};
-MODULE_DEVICE_TABLE(spi, vsc73xx_spi_ids);
-
 static struct spi_driver vsc73xx_spi_driver = {
 	.probe = vsc73xx_spi_probe,
 	.remove = vsc73xx_spi_remove,
 	.shutdown = vsc73xx_spi_shutdown,
-	.id_table = vsc73xx_spi_ids,
 	.driver = {
 		.name = "vsc73xx-spi",
 		.of_match_table = vsc73xx_of_match,

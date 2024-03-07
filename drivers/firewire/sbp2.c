@@ -408,7 +408,7 @@ static void sbp2_status_write(struct fw_card *card, struct fw_request *request,
 			      void *payload, size_t length, void *callback_data)
 {
 	struct sbp2_logical_unit *lu = callback_data;
-	struct sbp2_orb *orb = NULL, *iter;
+	struct sbp2_orb *orb;
 	struct sbp2_status status;
 	unsigned long flags;
 
@@ -433,18 +433,17 @@ static void sbp2_status_write(struct fw_card *card, struct fw_request *request,
 
 	/* Lookup the orb corresponding to this status write. */
 	spin_lock_irqsave(&lu->tgt->lock, flags);
-	list_for_each_entry(iter, &lu->orb_list, link) {
+	list_for_each_entry(orb, &lu->orb_list, link) {
 		if (STATUS_GET_ORB_HIGH(status) == 0 &&
-		    STATUS_GET_ORB_LOW(status) == iter->request_bus) {
-			iter->rcode = RCODE_COMPLETE;
-			list_del(&iter->link);
-			orb = iter;
+		    STATUS_GET_ORB_LOW(status) == orb->request_bus) {
+			orb->rcode = RCODE_COMPLETE;
+			list_del(&orb->link);
 			break;
 		}
 	}
 	spin_unlock_irqrestore(&lu->tgt->lock, flags);
 
-	if (orb) {
+	if (&orb->link != &lu->orb_list) {
 		orb->callback(orb, &status);
 		kref_put(&orb->kref, free_orb); /* orb callback reference */
 	} else {
@@ -1376,7 +1375,7 @@ static void complete_command_orb(struct sbp2_orb *base_orb,
 	sbp2_unmap_scatterlist(device->card->device, orb);
 
 	orb->cmd->result = result;
-	scsi_done(orb->cmd);
+	orb->cmd->scsi_done(orb->cmd);
 }
 
 static int sbp2_map_scatterlist(struct sbp2_command_orb *orb,
@@ -1579,12 +1578,10 @@ static ssize_t sbp2_sysfs_ieee1394_id_show(struct device *dev,
 
 static DEVICE_ATTR(ieee1394_id, S_IRUGO, sbp2_sysfs_ieee1394_id_show, NULL);
 
-static struct attribute *sbp2_scsi_sysfs_attrs[] = {
-	&dev_attr_ieee1394_id.attr,
+static struct device_attribute *sbp2_scsi_sysfs_attrs[] = {
+	&dev_attr_ieee1394_id,
 	NULL
 };
-
-ATTRIBUTE_GROUPS(sbp2_scsi_sysfs);
 
 static struct scsi_host_template scsi_driver_template = {
 	.module			= THIS_MODULE,
@@ -1598,7 +1595,7 @@ static struct scsi_host_template scsi_driver_template = {
 	.sg_tablesize		= SG_ALL,
 	.max_segment_size	= SBP2_MAX_SEG_SIZE,
 	.can_queue		= 1,
-	.sdev_groups		= sbp2_scsi_sysfs_groups,
+	.sdev_attrs		= sbp2_scsi_sysfs_attrs,
 };
 
 MODULE_AUTHOR("Kristian Hoegsberg <krh@bitplanet.net>");

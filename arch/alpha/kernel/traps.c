@@ -129,7 +129,9 @@ dik_show_trace(unsigned long *sp, const char *loglvl)
 		extern char _stext[], _etext[];
 		unsigned long tmp = *sp;
 		sp++;
-		if (!is_kernel_text(tmp))
+		if (tmp < (unsigned long) &_stext)
+			continue;
+		if (tmp >= (unsigned long) &_etext)
 			continue;
 		printk("%s[<%lx>] %pSR\n", loglvl, tmp, (void *)tmp);
 		if (i > 40) {
@@ -190,7 +192,7 @@ die_if_kernel(char * str, struct pt_regs *regs, long err, unsigned long *r9_15)
 		local_irq_enable();
 		while (1);
 	}
-	make_task_dead(SIGSEGV);
+	do_exit(SIGSEGV);
 }
 
 #ifndef CONFIG_MATHEMU
@@ -575,7 +577,7 @@ do_entUna(void * va, unsigned long opcode, unsigned long reg,
 
 	printk("Bad unaligned kernel access at %016lx: %p %lx %lu\n",
 		pc, va, opcode, reg);
-	make_task_dead(SIGSEGV);
+	do_exit(SIGSEGV);
 
 got_exception:
 	/* Ok, we caught the exception, but we don't want it.  Is there
@@ -630,7 +632,7 @@ got_exception:
 		local_irq_enable();
 		while (1);
 	}
-	make_task_dead(SIGSEGV);
+	do_exit(SIGSEGV);
 }
 
 /*

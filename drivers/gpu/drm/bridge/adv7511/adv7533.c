@@ -29,7 +29,7 @@ static void adv7511_dsi_config_timing_gen(struct adv7511 *adv)
 	struct mipi_dsi_device *dsi = adv->dsi;
 	struct drm_display_mode *mode = &adv->curr_mode;
 	unsigned int hsw, hfp, hbp, vsw, vfp, vbp;
-	static const u8 clock_div_by_lanes[] = { 6, 4, 3 };	/* 2, 3, 4 lanes */
+	u8 clock_div_by_lanes[] = { 6, 4, 3 };	/* 2, 3, 4 lanes */
 
 	hsw = mode->hsync_end - mode->hsync_start;
 	hfp = mode->hsync_start - mode->hdisplay;
@@ -100,27 +100,26 @@ void adv7533_dsi_power_off(struct adv7511 *adv)
 	regmap_write(adv->regmap_cec, 0x27, 0x0b);
 }
 
-enum drm_mode_status adv7533_mode_valid(struct adv7511 *adv,
-					const struct drm_display_mode *mode)
+void adv7533_mode_set(struct adv7511 *adv, const struct drm_display_mode *mode)
 {
-	int lanes;
 	struct mipi_dsi_device *dsi = adv->dsi;
+	int lanes, ret;
+
+	if (adv->num_dsi_lanes != 4)
+		return;
 
 	if (mode->clock > 80000)
 		lanes = 4;
 	else
 		lanes = 3;
 
-	/*
-	 * TODO: add support for dynamic switching of lanes
-	 * by using the bridge pre_enable() op . Till then filter
-	 * out the modes which shall need different number of lanes
-	 * than what was configured in the device tree.
-	 */
-	if (lanes != dsi->lanes)
-		return MODE_BAD;
-
-	return MODE_OK;
+	if (lanes != dsi->lanes) {
+		mipi_dsi_detach(dsi);
+		dsi->lanes = lanes;
+		ret = mipi_dsi_attach(dsi);
+		if (ret)
+			dev_err(&dsi->dev, "failed to change host lanes\n");
+	}
 }
 
 int adv7533_patch_registers(struct adv7511 *adv)
@@ -149,14 +148,17 @@ int adv7533_attach_dsi(struct adv7511 *adv)
 						 };
 
 	host = of_find_mipi_dsi_host_by_node(adv->host_node);
-	if (!host)
-		return dev_err_probe(dev, -EPROBE_DEFER,
-				     "failed to find dsi host\n");
+	if (!host) {
+		dev_err(dev, "failed to find dsi host\n");
+		return -EPROBE_DEFER;
+	}
 
-	dsi = devm_mipi_dsi_device_register_full(dev, host, &info);
-	if (IS_ERR(dsi))
-		return dev_err_probe(dev, PTR_ERR(dsi),
-				     "failed to create dsi device\n");
+	dsi = mipi_dsi_device_register_full(host, &info);
+	if (IS_ERR(dsi)) {
+		dev_err(dev, "failed to create dsi device\n");
+		ret = PTR_ERR(dsi);
+		goto err_dsi_device;
+	}
 
 	adv->dsi = dsi;
 
@@ -165,11 +167,24 @@ int adv7533_attach_dsi(struct adv7511 *adv)
 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_SYNC_PULSE |
 			  MIPI_DSI_MODE_NO_EOT_PACKET | MIPI_DSI_MODE_VIDEO_HSE;
 
-	ret = devm_mipi_dsi_attach(dev, dsi);
-	if (ret < 0)
-		return dev_err_probe(dev, ret, "failed to attach dsi to host\n");
+	ret = mipi_dsi_attach(dsi);
+	if (ret < 0) {
+		dev_err(dev, "failed to attach dsi to host\n");
+		goto err_dsi_attach;
+	}
 
 	return 0;
+
+err_dsi_attach:
+	mipi_dsi_device_unregister(dsi);
+err_dsi_device:
+	return ret;
+}
+
+void adv7533_detach_dsi(struct adv7511 *adv)
+{
+	mipi_dsi_detach(adv->dsi);
+	mipi_dsi_device_unregister(adv->dsi);
 }
 
 int adv7533_parse_dt(struct device_node *np, struct adv7511 *adv)
