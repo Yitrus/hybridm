@@ -113,7 +113,8 @@ unsigned long get_nr_lru_pages_node(struct mem_cgroup *memcg, pg_data_t *pgdat)
 }
 
 static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
-{
+{// edit by 100, 因为之前已经确定了能迁移多少页面到上级，原本的逻辑是上层剩多少迁移多少
+// 现在虽然我们执行action是希望迁移的，不过按理说应该也是充分利用，DRAM别空着啊。
     struct lruvec *lruvec;
     unsigned long lruvec_size;
 
@@ -126,53 +127,54 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
     return lruvec_size;
 }
 
-static bool need_direct_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
-{
-    return READ_ONCE(memcg->nodeinfo[pgdat->node_id]->need_demotion);
-}
+// static bool need_direct_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
+// {
+    // return READ_ONCE(memcg->nodeinfo[pgdat->node_id]->need_demotion);
+// }
 
 static bool need_toptier_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, unsigned long *nr_exceeded)
-{
+{// edit by 100, 这时的降级，判断会不会超过最大可降级的情况
     unsigned long nr_lru_pages, max_nr_pages;
     unsigned long nr_need_promoted;
-    unsigned long fasttier_max_watermark, fasttier_min_watermark;
+    // unsigned long fasttier_max_watermark, fasttier_min_watermark;
     int target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
     pg_data_t *target_pgdat;
   
     if (target_nid == NUMA_NO_NODE)
-	return false;
+		return false;
 
     target_pgdat = NODE_DATA(target_nid);
 
-    max_nr_pages = memcg->nodeinfo[pgdat->node_id]->max_nr_base_pages;
+    // max_nr_pages = memcg->nodeinfo[pgdat->node_id]->max_nr_base_pages;
     nr_lru_pages = get_nr_lru_pages_node(memcg, pgdat);
 
-    fasttier_max_watermark = get_memcg_promotion_watermark(max_nr_pages);
-    fasttier_min_watermark = get_memcg_demotion_watermark(max_nr_pages);
+    // fasttier_max_watermark = get_memcg_promotion_watermark(max_nr_pages);
+    // fasttier_min_watermark = get_memcg_demotion_watermark(max_nr_pages);
 
-    if (need_direct_demotion(pgdat, memcg)) {
-	if (nr_lru_pages + fasttier_max_watermark <= max_nr_pages)
-	    goto check_nr_need_promoted;
-	else if (nr_lru_pages < max_nr_pages)
-	    *nr_exceeded = fasttier_max_watermark - (max_nr_pages - nr_lru_pages);
-	else
-	    *nr_exceeded = nr_lru_pages + fasttier_max_watermark - max_nr_pages;
-	*nr_exceeded += 1U * 128 * 100; // 100 MB
+    //if (need_direct_demotion(pgdat, memcg)) {
+	// if (nr_lru_pages + fasttier_max_watermark <= max_nr_pages)
+	    // goto check_nr_need_promoted;
+	// else 
+	if (nr_lru_pages < *nr_exceeded)
+	    *nr_exceeded = nr_lru_pages - 1U * 128 * 100;
+	// else
+	    // *nr_exceeded = nr_lru_pages + fasttier_max_watermark - max_nr_pages;
+	// *nr_exceeded += 1U * 128 * 100; // 100 MB
 	return true;
-    }
+    //}
 
-check_nr_need_promoted:
-    nr_need_promoted = need_lowertier_promotion(target_pgdat, memcg);
-    if (nr_need_promoted) {
-	if (nr_lru_pages + nr_need_promoted + fasttier_max_watermark <= max_nr_pages)
-	    return false;
-    } else {
-	if (nr_lru_pages + fasttier_min_watermark <= max_nr_pages)
-	    return false;
-    }
+// check_nr_need_promoted:
+    // nr_need_promoted = need_lowertier_promotion(target_pgdat, memcg);
+    // if (nr_need_promoted) {
+	// if (nr_lru_pages + nr_need_promoted + fasttier_max_watermark <= max_nr_pages)
+	    // return false;
+    // } else {
+	// if (nr_lru_pages + fasttier_min_watermark <= max_nr_pages)
+	    // return false;
+    // }
 
-    *nr_exceeded = nr_lru_pages + nr_need_promoted + fasttier_max_watermark - max_nr_pages;
-    return true;
+    // *nr_exceeded = nr_lru_pages + nr_need_promoted + fasttier_max_watermark - max_nr_pages;
+    // return true;
 }
 
 static unsigned long node_free_pages(pg_data_t *pgdat)
@@ -386,20 +388,20 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 	    goto keep_locked;
 	if (!PageAnon(page) && nr_demotion_cand > nr_to_reclaim + HTMM_MIN_FREE_PAGES)
 	    goto keep_locked;
+// edit by 100, 不需要任何直方图的判断了
+	// if (htmm_nowarm == 0 && PageAnon(page)) {
+	    // if (PageTransHuge(page)) {
+		// struct page *meta = get_meta_page(page);
 
-	if (htmm_nowarm == 0 && PageAnon(page)) {
-	    if (PageTransHuge(page)) {
-		struct page *meta = get_meta_page(page);
+		// if (meta->idx >= memcg->warm_threshold)
+		    // goto keep_locked;
+	    // } else {
+		// unsigned int idx = get_pginfo_idx(page);
 
-		if (meta->idx >= memcg->warm_threshold)
-		    goto keep_locked;
-	    } else {
-		unsigned int idx = get_pginfo_idx(page);
-
-		if (idx >= memcg->warm_threshold)
-		    goto keep_locked;
-	    }
-	}
+		// if (idx >= memcg->warm_threshold)
+		    // goto keep_locked;
+	    // }
+	// }
 
 	unlock_page(page);
 	list_add(&page->lru, &demote_pages);
@@ -414,7 +416,7 @@ keep:
 
     nr_reclaimed = migrate_page_list(&demote_pages, pgdat, false);
     if (!list_empty(&demote_pages))
-	list_splice(&demote_pages, page_list);
+		list_splice(&demote_pages, page_list);
 
     list_splice(&ret_pages, page_list);
     return nr_reclaimed;
@@ -583,7 +585,7 @@ static unsigned long promote_lruvec(unsigned long nr_to_promote, short priority,
 
 static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 	unsigned long nr_exceeded)
-{
+{//edit by 100, 执行降级操作，但是要去掉和直方图、冷处理相关的方案
     struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
     short priority = DEF_PRIORITY;
     unsigned long nr_to_reclaim = 0, nr_evictable_pages = 0, nr_reclaimed = 0;
@@ -591,43 +593,42 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
     bool shrink_active = false;
 
     for_each_evictable_lru(lru) {
-	if (!is_file_lru(lru) && is_active_lru(lru))
-	    continue;
+		if (!is_file_lru(lru) && is_active_lru(lru))
+			continue;
 
-	nr_evictable_pages += lruvec_lru_size(lruvec, lru, MAX_NR_ZONES);
+		nr_evictable_pages += lruvec_lru_size(lruvec, lru, MAX_NR_ZONES);
     }
     
     nr_to_reclaim = nr_exceeded;	
     
-    if (nr_exceeded > nr_evictable_pages && need_direct_demotion(pgdat, memcg))
-	shrink_active = true;
+    if (nr_exceeded > nr_evictable_pages)
+		shrink_active = true;
 
     do {
-	nr_reclaimed += demote_lruvec(nr_to_reclaim - nr_reclaimed, priority,
+		nr_reclaimed += demote_lruvec(nr_to_reclaim - nr_reclaimed, priority,
 					pgdat, lruvec, shrink_active);
-	if (nr_reclaimed >= nr_to_reclaim)
-	    break;
-	priority--;
+		if (nr_reclaimed >= nr_to_reclaim)
+			break;
+		priority--;
     } while (priority);
 
-    if (htmm_nowarm == 0) {
-	int target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
-	unsigned long nr_lowertier_active =
-	    target_nid == NUMA_NO_NODE ? 0: need_lowertier_promotion(NODE_DATA(target_nid), memcg);
+    // if (htmm_nowarm == 0) {
+	// int target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
+	// unsigned long nr_lowertier_active =
+	    // target_nid == NUMA_NO_NODE ? 0: need_lowertier_promotion(NODE_DATA(target_nid), memcg);
 	
-	nr_lowertier_active = nr_lowertier_active < nr_to_reclaim ?
-			nr_lowertier_active : nr_to_reclaim;
-	if (nr_lowertier_active && nr_reclaimed < nr_lowertier_active)
-	    memcg->warm_threshold = memcg->active_threshold;
-    }
+	// nr_lowertier_active = nr_lowertier_active < nr_to_reclaim ?
+			// nr_lowertier_active : nr_to_reclaim;
+	// if (nr_lowertier_active && nr_reclaimed < nr_lowertier_active)
+	    // memcg->warm_threshold = memcg->active_threshold;
+    // }
 
     /* check the condition */
-    do {
-	unsigned long max = memcg->nodeinfo[pgdat->node_id]->max_nr_base_pages;
-	if (get_nr_lru_pages_node(memcg, pgdat) +
-		get_memcg_demotion_watermark(max) < max)
-	    WRITE_ONCE(memcg->nodeinfo[pgdat->node_id]->need_demotion, false);
-    } while (0);
+    // do {
+		// unsigned long max = memcg->nodeinfo[pgdat->node_id]->max_nr_base_pages;
+		// if (get_nr_lru_pages_node(memcg, pgdat) + get_memcg_demotion_watermark(max) < max)
+	    // WRITE_ONCE(memcg->nodeinfo[pgdat->node_id]->need_demotion, false);
+    // } while (0);
     return nr_reclaimed;
 }
 
@@ -935,132 +936,22 @@ static struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat)
     return pn;
 }
 
-static int kmigraterd_demotion(pg_data_t *pgdat)
+static int kmigraterd_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, unsigned long nr_demotion)
 {
-    const struct cpumask *cpumask = cpumask_of_node(pgdat->node_id);
-
-    if (!cpumask_empty(cpumask))
-	set_cpus_allowed_ptr(pgdat->kmigraterd, cpumask);
-
-    for ( ; ; ) {
-	struct mem_cgroup_per_node *pn;
-	struct mem_cgroup *memcg;
-	unsigned long nr_exceeded = 0;
-	LIST_HEAD(split_list);
-
-	if (kthread_should_stop())
-	    break;
-
-	pn = next_memcg_cand(pgdat);
-	if (!pn) {
-	    msleep_interruptible(1000);
-	    continue;
-	}
-
-	memcg = pn->memcg;
-	if (!memcg || !memcg->htmm_enabled) {
-	    spin_lock(&pgdat->kmigraterd_lock);
-	    if (!list_empty_careful(&pn->kmigraterd_list))
-		list_del(&pn->kmigraterd_list);
-	    spin_unlock(&pgdat->kmigraterd_lock);
-	    continue;
-	}
-
-	/* performs split */
-	if (htmm_thres_split != 0 &&
-		!list_empty(&(&pn->deferred_split_queue)->split_queue)) {
-	    unsigned long nr_split;
-	    nr_split = deferred_split_scan_for_htmm(pn, &split_list);
-	    if (!list_empty(&split_list)) {
-		putback_split_pages(&split_list, mem_cgroup_lruvec(memcg, pgdat));
-	    }
-	}
-	/* performs cooling */
-	if (need_lru_cooling(pn))
-	    cooling_node(pgdat, memcg);
-	else if (need_lru_adjusting(pn)) {
-	    adjusting_node(pgdat, memcg, true);
-	    if (pn->need_adjusting_all == true)
-		// adjusting the inactive list
-		adjusting_node(pgdat, memcg, false);
-	}
-	
-	/* demotes inactive lru pages */
-	if (need_toptier_demotion(pgdat, memcg, &nr_exceeded)) {
-	    demote_node(pgdat, memcg, nr_exceeded);
-	}
-	//if (need_direct_demotion(pgdat, memcg))
-	  //  goto demotion;
-
-	/* default: wait 50 ms */
-	wait_event_interruptible_timeout(pgdat->kmigraterd_wait,
-	    need_direct_demotion(pgdat, memcg),
-	    msecs_to_jiffies(htmm_demotion_period_in_ms));	    
+	// edit by 100, 这里做页面 降级 降级 降级 操作
+	if (need_toptier_demotion(pgdat, memcg, &nr_demotion)) {
+	    demote_node(pgdat, memcg, nr_demotion);
     }
     return 0;
 }
 
-static int kmigraterd_promotion(pg_data_t *pgdat)
+static int kmigraterd_promotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
 {
-    const struct cpumask *cpumask;
-
-    if (htmm_cxl_mode)
-    	cpumask = cpumask_of_node(pgdat->node_id);
-    else
-	cpumask = cpumask_of_node(pgdat->node_id - 2);
-
-    if (!cpumask_empty(cpumask))
-	set_cpus_allowed_ptr(pgdat->kmigraterd, cpumask);
-
-    for ( ; ; ) {
-	struct mem_cgroup_per_node *pn;
-	struct mem_cgroup *memcg;
-	LIST_HEAD(split_list);
-
-	if (kthread_should_stop())
-	    break;
-
-	pn = next_memcg_cand(pgdat);
-	if (!pn) {
-	    msleep_interruptible(1000);
-	    continue;
-	}
-
-	memcg = pn->memcg;
-	if (!memcg || !memcg->htmm_enabled) {
-	    spin_lock(&pgdat->kmigraterd_lock);
-	    if (!list_empty_careful(&pn->kmigraterd_list))
-		list_del(&pn->kmigraterd_list);
-	    spin_unlock(&pgdat->kmigraterd_lock);
-	    continue;
-	}
-
-	/* performs split */
-	if (htmm_thres_split != 0 &&
-		!list_empty(&(&pn->deferred_split_queue)->split_queue)) {
-	    unsigned long nr_split;
-	    nr_split = deferred_split_scan_for_htmm(pn, &split_list);
-	    if (!list_empty(&split_list)) {
-		putback_split_pages(&split_list, mem_cgroup_lruvec(memcg, pgdat));
-	    }
-	}
-
-	if (need_lru_cooling(pn))
-	    cooling_node(pgdat, memcg);
-	else if (need_lru_adjusting(pn)) {
-	    adjusting_node(pgdat, memcg, true);
-	    if (pn->need_adjusting_all == true)
-		// adjusting the inactive list
-		adjusting_node(pgdat, memcg, false);
-	}
-
-	/* promotes hot pages to fast memory node */
+   // edit by 100, 这里做页面 升级 升级 升级 操作，promotes hot pages to fast memory node
+ 
 	if (need_lowertier_promotion(pgdat, memcg)) {
 	    promote_node(pgdat, memcg);
 	}
-
-	msleep_interruptible(htmm_promotion_period_in_ms);
-    }
 
     return 0;
 }
@@ -1070,17 +961,52 @@ static int kmigraterd(void *p)
     pg_data_t *pgdat = (pg_data_t *)p;
     int nid = pgdat->node_id;
 
-    if (htmm_cxl_mode) {
-	if (nid == 0)
-	    return kmigraterd_demotion(pgdat);
-	else
-	    return kmigraterd_promotion(pgdat);
+// edit by 100,假设已经获得需要操作的数量，现在判断上下应该被迁移的数目
+// 这些操作是根据cgroup来做的, 遍历node 0的
+	for ( ; ; ) {
+	    struct mem_cgroup_per_node *pn;
+	    struct mem_cgroup *memcg;
+		unsigned long nr_action;
+		unsigned long nr_available;
+		unsigned long nr_demotion;
+	    LIST_HEAD(split_list);
+
+	    if (kthread_should_stop()) // 还不清楚这是干啥，先保留下来
+	        break;
+		
+		pn = next_memcg_cand(pgdat); // 虽然目前不太清楚这个内存控制组是怎么得到的
+	    //但是由于内存控制组是全局的，从DRAM节点也能遍历得到也属于PM节点的cgroup
+		if (!pn) { // 如果没有内存控制组就睡眠1s
+	        msleep_interruptible(1000);
+	        continue;
+	    }
+
+	    memcg = pn->memcg;
+	    if (!memcg || !memcg->htmm_enabled) {
+	        spin_lock(&pgdat->kmigraterd_lock);
+	        if (!list_empty_careful(&pn->kmigraterd_list))
+				list_del(&pn->kmigraterd_list);
+	        spin_unlock(&pgdat->kmigraterd_lock);
+	        continue;
+	    }
+	
+		get_action(memcg, &nr_action);
+		if(!nr_action){ //如果有行动的话
+			promotion_available(nid, memcg, &nr_available);
+			nr_demotion = nr_action-nr_available;
+			if(nr_demotion){ //大于0的话就需要降级，降级操作是由DRAM node做的
+				//有可能不会降级那么多，相应能升级的就要更少，但不需要知道具体的数，因为迁移上去的页面由当时空多少决定
+				kmigraterd_demotion(pgdat, memcg, nr_demotion);
+			}
+			//升级，升级操作是由PM node做的
+			kmigraterd_promotion(NODE_DATA(nid+2), memcg);
+		}
+		
+		// 然后后台线程睡眠
+		msleep_interruptible(htmm_promotion_period_in_ms);
     }
 
-    if (node_is_toptier(nid))
-	return kmigraterd_demotion(pgdat);
-    else
-	return kmigraterd_promotion(pgdat);
+    return 0;
 }
 
 void kmigraterd_wakeup(int nid)
