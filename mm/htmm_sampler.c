@@ -292,115 +292,110 @@ static int ksamplingd(void *data)
 								break;
 							}
 
-					update_pginfo(he->pid, he->addr, event);
-					//count_vm_event(HTMM_NR_SAMPLED);
-					nr_sampled++;
+							update_pginfo(he->pid, he->addr, event);
+							//count_vm_event(HTMM_NR_SAMPLED);
+							nr_sampled++;
 
-			    if (event == DRAMREAD) {
-				nr_dram++;
-				hr_dram++;
-			    }
-			    else if (event == CXLREAD || event == NVMREAD) {
-				nr_nvm++;
-				hr_nvm++;
-			    }
-			    else
-				nr_write++;
-			    break;
-			case PERF_RECORD_THROTTLE:
-			case PERF_RECORD_UNTHROTTLE:
-			    nr_throttled++;
-			    break;
-			case PERF_RECORD_LOST_SAMPLES:
-			    nr_lost ++;
-			    break;
-			default:
-			    nr_unknown++;
-			    break;
-		    }
-		    if (nr_sampled % 500000 == 0) {
-			trace_printk("nr_sampled: %llu, nr_dram: %llu, nr_nvm: %llu, nr_write: %llu, nr_throttled: %llu \n", nr_sampled, nr_dram, nr_nvm, nr_write,
-				nr_throttled);
-			nr_dram = 0;
-			nr_nvm = 0;
-			nr_write = 0;
-		    }
-		    /* read, write barrier */
-		    smp_mb();
-		    WRITE_ONCE(up->data_tail, up->data_tail + ph->size);
-		} while (cond);
-	    }
-	}
-	/* if ksampled_soft_cpu_quota is zero, disable dynamic pebs feature */
-	if (!ksampled_soft_cpu_quota)
-	    continue;
+							if (event == DRAMREAD) {
+								nr_dram++;
+								hr_dram++;
+							}
+							else if (event == CXLREAD || event == NVMREAD) {
+								nr_nvm++;
+								hr_nvm++;
+							}
+							else
+								nr_write++;
+							break;
+						case PERF_RECORD_THROTTLE:
+						case PERF_RECORD_UNTHROTTLE:
+							nr_throttled++;
+							break;
+						case PERF_RECORD_LOST_SAMPLES:
+							nr_lost ++;
+							break;
+						default:
+							nr_unknown++;
+							break;
+					}
+					if (nr_sampled % 500000 == 0) {
+						trace_printk("nr_sampled: %llu, nr_dram: %llu, nr_nvm: %llu, nr_write: %llu, nr_throttled: %llu \n", nr_sampled, nr_dram, nr_nvm, nr_write,nr_throttled);
+						nr_dram = 0;
+						nr_nvm = 0;
+						nr_write = 0;
+					}
+					/* read, write barrier */
+					smp_mb();
+					WRITE_ONCE(up->data_tail, up->data_tail + ph->size);
+				} while (cond);
+			}
+		}	
+		/* if ksampled_soft_cpu_quota is zero, disable dynamic pebs feature */
+		if (!ksampled_soft_cpu_quota)
+			continue;
 
-	/* sleep */
-	schedule_timeout_interruptible(sleep_timeout);
+		/* sleep */
+		schedule_timeout_interruptible(sleep_timeout);
 
-	/* check elasped time */
-	cur = jiffies;
-	if ((cur - elapsed_cputime) >= cpucap_period) {
-	    u64 cur_runtime = t->se.sum_exec_runtime;
-	    exec_runtime = cur_runtime - exec_runtime; //ns
-	    elapsed_cputime = jiffies_to_usecs(cur - elapsed_cputime); //us
-	    if (!cputime) {
-		u64 cur_cputime = div64_u64(exec_runtime, elapsed_cputime);
-		// EMA with the scale factor (0.2)
-		cputime = ((cur_cputime << 3) + (cputime << 1)) / 10;
-	    } else
-		cputime = div64_u64(exec_runtime, elapsed_cputime);
+		/* check elasped time 这里也是在调整采样的事件间隔*/
+		cur = jiffies;
+		if ((cur - elapsed_cputime) >= cpucap_period) {
+			u64 cur_runtime = t->se.sum_exec_runtime;
+			exec_runtime = cur_runtime - exec_runtime; //ns
+			elapsed_cputime = jiffies_to_usecs(cur - elapsed_cputime); //us
+			if (!cputime) {
+				u64 cur_cputime = div64_u64(exec_runtime, elapsed_cputime);
+				// EMA with the scale factor (0.2)
+				cputime = ((cur_cputime << 3) + (cputime << 1)) / 10;
+			} else
+				cputime = div64_u64(exec_runtime, elapsed_cputime);
 
-	    /* to prevent frequent updates, allow for a slight variation of +/- 0.5% */
-	    if (cputime > (ksampled_soft_cpu_quota + 5) &&
-		    sample_period != pcount) {
-		/* need to increase the sample period */
-		/* only increase by 1 */
-		unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
-		increase_sample_period(&sample_period, &sample_inst_period);
-		if (tmp1 != sample_period || tmp2 != sample_inst_period)
-		    pebs_update_period(get_sample_period(sample_period),
-				       get_sample_inst_period(sample_inst_period));
-	    } else if (cputime < (ksampled_soft_cpu_quota - 5) && sample_period) {
-		unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
-		decrease_sample_period(&sample_period, &sample_inst_period);
-		if (tmp1 != sample_period || tmp2 != sample_inst_period)
-		    pebs_update_period(get_sample_period(sample_period),
-				    get_sample_inst_period(sample_inst_period));
-	    }
-	    /* does it need to prevent ping-pong behavior? */
+			/* to prevent frequent updates, allow for a slight variation of +/- 0.5% */
+			if (cputime > (ksampled_soft_cpu_quota + 5) &&
+				sample_period != pcount) {
+				/* need to increase the sample period */
+				/* only increase by 1 */
+				unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
+				increase_sample_period(&sample_period, &sample_inst_period);
+			if (tmp1 != sample_period || tmp2 != sample_inst_period)
+				pebs_update_period(get_sample_period(sample_period),get_sample_inst_period(sample_inst_period));
+			} else if (cputime < (ksampled_soft_cpu_quota - 5) && sample_period) {
+				unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
+				decrease_sample_period(&sample_period, &sample_inst_period);
+				if (tmp1 != sample_period || tmp2 != sample_inst_period)
+					pebs_update_period(get_sample_period(sample_period),get_sample_inst_period(sample_inst_period));
+			}
+			/* does it need to prevent ping-pong behavior? */
 	    
-	    elapsed_cputime = cur;
-	    exec_runtime = cur_runtime;
-	}
+			elapsed_cputime = cur;
+			exec_runtime = cur_runtime;
+		}
 
-	/* This is used for reporting the sample period and cputime */
-	if (cur - trace_cputime >= trace_period) {
-	    unsigned long hr = 0;
-	    u64 cur_runtime = t->se.sum_exec_runtime;
-	    trace_runtime = cur_runtime - trace_runtime;
-	    trace_cputime = jiffies_to_usecs(cur - trace_cputime);
-	    trace_cputime = div64_u64(trace_runtime, trace_cputime);
+			/* This is used for reporting the sample period and cputime */
+		if (cur - trace_cputime >= trace_period) {
+			unsigned long hr = 0;
+			u64 cur_runtime = t->se.sum_exec_runtime;
+			trace_runtime = cur_runtime - trace_runtime;
+			trace_cputime = jiffies_to_usecs(cur - trace_cputime);
+			trace_cputime = div64_u64(trace_runtime, trace_cputime);
 	    
-	    if (hr_dram + hr_nvm == 0)
-		hr = 0;
-	    else
-		hr = hr_dram * 10000 / (hr_dram + hr_nvm);
-	    trace_printk("sample_period: %lu || cputime: %lu  || hit ratio: %lu\n",
-		    get_sample_period(sample_period), trace_cputime, hr);
+			if (hr_dram + hr_nvm == 0)
+				hr = 0;
+			else
+				hr = hr_dram * 10000 / (hr_dram + hr_nvm);
+			trace_printk("sample_period: %lu || cputime: %lu  || hit ratio: %lu\n",get_sample_period(sample_period), trace_cputime, hr);
 	    
-	    hr_dram = hr_nvm = 0;
-	    trace_cputime = cur;
-	    trace_runtime = cur_runtime;
-	}
+			hr_dram = hr_nvm = 0;
+			trace_cputime = cur;
+			trace_runtime = cur_runtime;
+		}
     }
 
     total_runtime = (t->se.sum_exec_runtime) - total_runtime; // ns
     total_cputime = jiffies_to_usecs(jiffies - total_cputime); // us
 
     printk("nr_sampled: %llu, nr_throttled: %llu, nr_lost: %llu\n", nr_sampled, nr_throttled, nr_lost);
-    printk("total runtime: %llu ns, total cputime: %lu us, cpu usage: %llu\n",
-	    total_runtime, total_cputime, (total_runtime) / total_cputime);
+    printk("total runtime: %llu ns, total cputime: %lu us, cpu usage: %llu\n",total_runtime, total_cputime, (total_runtime) / total_cputime);
 
     return 0;
 }
