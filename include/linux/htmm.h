@@ -3,18 +3,20 @@
 #define DEFERRED_SPLIT_ISOLATED 1
 
 #define BUFFER_SIZE	32 /* 128: 1MB */
-#define CPUS_PER_SOCKET 20
+//edit by 100, ubuntu20那台是旧服务器12个核心一个socket，而新电脑ubuntu18那台是28个核心
+#define CPUS_PER_SOCKET 28
 #define MAX_MIGRATION_RATE_IN_MBPS  2048 /* 2048MB per sec */
 
 
 /* pebs events */
-#define DRAM_LLC_LOAD_MISS  0x1d3
-#define REMOTE_DRAM_LLC_LOAD_MISS   0x2d3
-#define NVM_LLC_LOAD_MISS   0x80d1
-#define ALL_STORES	    0x82d0
-#define ALL_LOADS	    0x81d0
-#define STLB_MISS_STORES    0x12d0
-#define STLB_MISS_LOADS	    0x11d0
+// edit by yxy, 需要重新定义要采样的事件
+#define DRAM_LLC_LOAD_MISS  0x1d3 //这个肯定会读DRAM也会被访问留下
+#define REMOTE_DRAM_LLC_LOAD_MISS   0x2d3 //这个没用到
+#define NVM_LLC_LOAD_MISS   0x80d1 //这个没用到
+#define ALL_STORES	    0x82d0 //这个表示对于所有内存的写入，就还好
+#define ALL_LOADS	    0x81d0 //这个没用到
+#define STLB_MISS_STORES    0x12d0 //这个没用到
+#define STLB_MISS_LOADS	    0x11d0 //这个没用到
 
 /* tmm option */
 #define HTMM_NO_MIG	    0x0	/* unused */
@@ -81,12 +83,14 @@ struct htmm_event {
 };
 
 enum events {
-    DRAMREAD = 0,
-    NVMREAD = 1,
-    MEMWRITE = 2,
-    TLB_MISS_LOADS = 3,
-    TLB_MISS_STORES = 4,
-    CXLREAD = 5, // emulated by remote DRAM node
+    DRAMREAD = 0, // 那我就用他自己的自定义事件来表示带宽的情况吧
+    // NVMREAD = 1,
+    MEMWRITE = 1,
+    // TLB_MISS_LOADS = 3,
+    // TLB_MISS_STORES = 4,
+    // CXLREAD = 5, // emulated by remote DRAM node
+	PERF_COUNT_HW_CPU_CYCLES = 2, // edit by 100, 这是采样时钟周期的，总的周期/采样间隔
+	PERF_COUNT_HW_INSTRUCTIONS = 3, //浮点数计算数，不过又不是HPC应用所以好像不太适用，不过那啥ML的算法也是这样
     N_HTMMEVENTS
 };
 

@@ -25,22 +25,26 @@ static bool valid_va(unsigned long addr)
 }
 
 static __u64 get_pebs_event(enum events e)
-{
-    switch (e) {
+{//edit by 100, 带宽的收集包括两者的读取量，还有写入量。
+    switch (e) { //但是这些定义和我看到的不太一样啊
 	case DRAMREAD:
 	    return DRAM_LLC_LOAD_MISS;
-	case NVMREAD:
-	    if (!htmm_cxl_mode)
-		return NVM_LLC_LOAD_MISS;
-	    else
-		return N_HTMMEVENTS;
+	// case NVMREAD:
+	    // if (!htmm_cxl_mode)
+		// return NVM_LLC_LOAD_MISS;
+	    // else
+		// return N_HTMMEVENTS;
 	case MEMWRITE:
 	    return ALL_STORES;
-	case CXLREAD:
-	    if (htmm_cxl_mode)
-		return REMOTE_DRAM_LLC_LOAD_MISS;
-	    else
-		return N_HTMMEVENTS;
+	// case CXLREAD:
+	    // if (htmm_cxl_mode)
+		// return REMOTE_DRAM_LLC_LOAD_MISS;
+	    // else
+		// return N_HTMMEVENTS;
+	case PERF_COUNT_HW_CPU_CYCLES:
+		return PERF_COUNT_HW_CPU_CYCLES;
+	case PERF_COUNT_HW_INSTRUCTIONS:
+		return PERF_COUNT_HW_INSTRUCTIONS;
 	default:
 	    return N_HTMMEVENTS;
     }
@@ -48,22 +52,28 @@ static __u64 get_pebs_event(enum events e)
 
 static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
 	__u64 type, __u32 pid)
-{
-    struct perf_event_attr attr;
-    struct file *file;
-    int event_fd, __pid;
+{ //再看看采样模板，不希望记录上下文数据
+    struct perf_event_attr attr; // 函数需要的结构体，告诉这个文件描述符该怎么创建，因为采样不同的事件最后传回的perf_event结构体也不一样。
+    struct file *file; // 已打开的文件在内核中用file结构体表示，文件描述符表中的指针指向file结构体。
+    int event_fd, __pid; // 我要接收的文件句柄
 
     memset(&attr, 0, sizeof(struct perf_event_attr));
 
-    attr.type = PERF_TYPE_RAW;
+	if(config != PERF_COUNT_HW_CPU_CYCLES && config != PERF_COUNT_HW_INSTRUCTIONS){
+		// 要检测的类型有硬件和自定义类，因为原本的自定义类型表现的很好
+		attr.type = PERF_TYPE_RAW; 
+	}else{
+		attr.type = PERF_TYPE_HARDWARE; 
+	}
     attr.size = sizeof(struct perf_event_attr);
-    attr.config = config;
+    attr.config = config; //要监测的采样事件
     attr.config1 = config1;
+	// 采样事件间隔
     if (config == ALL_STORES)
-	attr.sample_period = htmm_inst_sample_period;
+		attr.sample_period = htmm_inst_sample_period;
     else
-	attr.sample_period = get_sample_period(0);
-    attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR;
+		attr.sample_period = get_sample_period(0);
+    attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID; //要采样的信息是什么，IP就是对应的值，TID先保留看需不需要过滤线程
     attr.disabled = 0;
     attr.exclude_kernel = 1;
     attr.exclude_hv = 1;
@@ -73,21 +83,21 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     attr.enable_on_exec = 1;
 
     if (pid == 0)
-	__pid = -1;
+		__pid = -1;
     else
-	__pid = pid;
+		__pid = pid;
 	
     event_fd = htmm__perf_event_open(&attr, __pid, cpu, -1, 0);
     //event_fd = htmm__perf_event_open(&attr, -1, cpu, -1, 0);
     if (event_fd <= 0) {
-	printk("[error htmm__perf_event_open failure] event_fd: %d\n", event_fd);
-	return -1;
+		printk("[error htmm__perf_event_open failure] event_fd: %d\n", event_fd);
+		return -1;
     }
 
     file = fget(event_fd);
     if (!file) {
-	printk("invalid file\n");
-	return -1;
+		printk("invalid file\n");
+		return -1;
     }
     mem_event[cpu][type] = fget(event_fd)->private_data;
     return 0;
@@ -104,16 +114,20 @@ static int pebs_init(pid_t pid, int node)
     
     printk("pebs_init\n");   
     for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
-	for (event = 0; event < N_HTMMEVENTS; event++) {
+	for (event = 0; event < N_HTMMEVENTS; event++) { 
+	//要先确定有多少个cpu核心，还要确定哪些事件是根据cpu核心来确定的
+	//在设计的Q-Table表里，应该都是根据CPU核心来确定的
+	//ubuntu20那台是旧服务器12个核心一个socket，而新电脑ubuntu18那台是28个核心
+	// 都能跑的原因应该是运行脚本里写了限制task数目来着。
 	    if (get_pebs_event(event) == N_HTMMEVENTS) {
-		mem_event[cpu][event] = NULL;
-		continue;
+			mem_event[cpu][event] = NULL;
+			continue;
 	    }
 
 	    if (__perf_event_open(get_pebs_event(event), 0, cpu, event, pid))
-		return -1;
+			return -1;
 	    if (htmm__perf_event_init(mem_event[cpu][event], BUFFER_SIZE))
-		return -1;
+			return -1;
 	}
     }
 
@@ -178,11 +192,12 @@ static void pebs_update_period(uint64_t value, uint64_t inst_value)
 
 static int ksamplingd(void *data)
 {
+	//edit by 100, 计算页面数量
     unsigned long long nr_sampled = 0, nr_dram = 0, nr_nvm = 0, nr_write = 0;
     unsigned long long nr_throttled = 0, nr_lost = 0, nr_unknown = 0;
     unsigned long long nr_skip = 0;
 
-    /* used for calculating average cpu usage of ksampled */
+    /* used for calculating average cpu usage of ksampled 计算CPU开销，用于改变采样周期来着 */
     struct task_struct *t = current;
     /* a unit of cputime: permil (1/1000) */
     u64 total_runtime, exec_runtime, cputime = 0;
@@ -206,80 +221,80 @@ static int ksamplingd(void *data)
     trace_cputime = total_cputime = elapsed_cputime = jiffies;
     sleep_timeout = usecs_to_jiffies(2000);
 
-    /* TODO implements per-CPU node ksamplingd by using pg_data_t */
+    /* TODO implements per-CPU node ksampl ingd by using pg_data_t */
     /* Currently uses a single CPU node(0) */
     const struct cpumask *cpumask = cpumask_of_node(0);
     if (!cpumask_empty(cpumask))
-	do_set_cpus_allowed(access_sampling, cpumask);
+		do_set_cpus_allowed(access_sampling, cpumask);
 
     while (!kthread_should_stop()) {
-	int cpu, event, cond = false;
+		int cpu, event, cond = false;
     
-	if (htmm_mode == HTMM_NO_MIG) {
-	    msleep_interruptible(10000);
-	    continue;
-	}
+		if (htmm_mode == HTMM_NO_MIG) {
+			msleep_interruptible(10000);
+			continue;
+		}
 	
-	for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
-	    for (event = 0; event < N_HTMMEVENTS; event++) {
-		do {
-		    struct perf_buffer *rb;
-		    struct perf_event_mmap_page *up;
-		    struct perf_event_header *ph;
-		    struct htmm_event *he;
-		    unsigned long pg_index, offset;
-		    int page_shift;
-		    __u64 head;
+		for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
+			for (event = 0; event < N_HTMMEVENTS; event++) {
+				do {
+					struct perf_buffer *rb;
+					struct perf_event_mmap_page *up;
+					struct perf_event_header *ph;
+					struct htmm_event *he;
+					unsigned long pg_index, offset;
+					int page_shift;
+					__u64 head;
+	
+					if (!mem_event[cpu][event]) {
+						//continue;
+						break;
+					}
 
-		    if (!mem_event[cpu][event]) {
-			//continue;
-			break;
-		    }
+					__sync_synchronize();
 
-		    __sync_synchronize();
+					rb = mem_event[cpu][event]->rb;
+					if (!rb) {
+						printk("event->rb is NULL\n");
+						return -1;
+					}
+					/* perf_buffer is ring buffer */
+					up = READ_ONCE(rb->user_page);
+					head = READ_ONCE(up->data_head);
+					if (head == up->data_tail) {
+						if (cpu < 16)
+							nr_skip++;
+						//continue;
+						break;
+					}
 
-		    rb = mem_event[cpu][event]->rb;
-		    if (!rb) {
-			printk("event->rb is NULL\n");
-			return -1;
-		    }
-		    /* perf_buffer is ring buffer */
-		    up = READ_ONCE(rb->user_page);
-		    head = READ_ONCE(up->data_head);
-		    if (head == up->data_tail) {
-			if (cpu < 16)
-			    nr_skip++;
-			//continue;
-			break;
-		    }
+					head -= up->data_tail;
+					if (head > (BUFFER_SIZE * ksampled_max_sample_ratio / 100)) {
+						cond = true;
+					} else if (head < (BUFFER_SIZE * ksampled_min_sample_ratio / 100)) {
+						cond = false;
+					}
 
-		    head -= up->data_tail;
-		    if (head > (BUFFER_SIZE * ksampled_max_sample_ratio / 100)) {
-			cond = true;
-		    } else if (head < (BUFFER_SIZE * ksampled_min_sample_ratio / 100)) {
-			cond = false;
-		    }
+					/* read barrier */
+					smp_rmb();
 
-		    /* read barrier */
-		    smp_rmb();
+					page_shift = PAGE_SHIFT + page_order(rb);
+					/* get address of a tail sample */
+					offset = READ_ONCE(up->data_tail);
+					pg_index = (offset >> page_shift) & (rb->nr_pages - 1);
+					offset &= (1 << page_shift) - 1;
 
-		    page_shift = PAGE_SHIFT + page_order(rb);
-		    /* get address of a tail sample */
-		    offset = READ_ONCE(up->data_tail);
-		    pg_index = (offset >> page_shift) & (rb->nr_pages - 1);
-		    offset &= (1 << page_shift) - 1;
+					ph = (void*)(rb->data_pages[pg_index] + offset);
+					switch (ph->type) {
+						case PERF_RECORD_SAMPLE:
+							he = (struct htmm_event *)ph;
+							if (!valid_va(he->addr)) {
+								break;
+							}
 
-		    ph = (void*)(rb->data_pages[pg_index] + offset);
-		    switch (ph->type) {
-			case PERF_RECORD_SAMPLE:
-			    he = (struct htmm_event *)ph;
-			    if (!valid_va(he->addr)) {
-				break;
-			    }
-
-			    update_pginfo(he->pid, he->addr, event);
-			    //count_vm_event(HTMM_NR_SAMPLED);
-			    nr_sampled++;
+					update_pginfo(he->pid, he->addr, event);
+					//count_vm_event(HTMM_NR_SAMPLED);
+					nr_sampled++;
 
 			    if (event == DRAMREAD) {
 				nr_dram++;
