@@ -11,12 +11,12 @@
 /* pebs events */
 // edit by yxy, 需要重新定义要采样的事件
 #define DRAM_LLC_LOAD_MISS  0x1d3 //这个肯定会读DRAM也会被访问留下
-#define REMOTE_DRAM_LLC_LOAD_MISS   0x2d3 //这个没用到
-#define NVM_LLC_LOAD_MISS   0x80d1 //这个没用到
+#define REMOTE_DRAM_LLC_LOAD_MISS   0x2d3 /* unused */
+#define NVM_LLC_LOAD_MISS   0x80d1 /* unused */
 #define ALL_STORES	    0x82d0 //这个表示对于所有内存的写入，就还好
-#define ALL_LOADS	    0x81d0 //这个没用到
-#define STLB_MISS_STORES    0x12d0 //这个没用到
-#define STLB_MISS_LOADS	    0x11d0 //这个没用到
+#define ALL_LOADS	    0x81d0 /* unused */
+#define STLB_MISS_STORES    0x12d0 /* unused */
+#define STLB_MISS_LOADS	    0x11d0 /* unused */
 
 /* tmm option */
 #define HTMM_NO_MIG	    0x0	/* unused */
@@ -78,8 +78,8 @@ static const unsigned int pebs_inst_period_list[pinstcount] ={
 struct htmm_event {
     struct perf_event_header header;
     __u64 ip;
-    __u32 pid, tid;
-    __u64 addr;
+    //__u32 pid, tid;
+    //__u64 addr;
 };
 
 enum events {
@@ -89,8 +89,8 @@ enum events {
     // TLB_MISS_LOADS = 3,
     // TLB_MISS_STORES = 4,
     // CXLREAD = 5, // emulated by remote DRAM node
-	PERF_COUNT_HW_CPU_CYCLES = 2, // edit by 100, 这是采样时钟周期的，总的周期/采样间隔
-	PERF_COUNT_HW_INSTRUCTIONS = 3, //浮点数计算数，不过又不是HPC应用所以好像不太适用，不过那啥ML的算法也是这样
+	CPU_CYCLES = 2, // edit by 100, 这是采样时钟周期的，总的周期/采样间隔
+	INSTRUCTIONS = 3, //浮点数计算数，不过又不是HPC应用所以好像不太适用，不过那啥ML的算法也是这样
     N_HTMMEVENTS
 };
 
@@ -112,6 +112,7 @@ extern int set_page_coolstatus(struct page *page, pte_t *pte, struct mm_struct *
 extern void set_lru_adjusting(struct mem_cgroup *memcg, bool inc_thres);
 
 extern void update_pginfo(pid_t pid, unsigned long address, enum events e);
+extern void update_stats(long long nr_bw, long long nr_cyc, long long nr_ins);
 
 extern bool deferred_split_huge_page_for_htmm(struct page *page);
 extern unsigned long deferred_split_scan_for_htmm(struct mem_cgroup_per_node *pn,

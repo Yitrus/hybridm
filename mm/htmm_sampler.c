@@ -5,6 +5,7 @@
 #include <linux/memcontrol.h>
 #include <linux/mempolicy.h>
 #include <linux/sched.h>
+//有这个头文件应该就能知道代表算力的宏定义
 #include <linux/perf_event.h>
 #include <linux/delay.h>
 #include <linux/sched/cputime.h>
@@ -16,13 +17,13 @@
 struct task_struct *access_sampling = NULL;
 struct perf_event ***mem_event;
 
-static bool valid_va(unsigned long addr)
-{
-    if (!(addr >> (PGDIR_SHIFT + 9)) && addr != 0)
-	return true;
-    else
-	return false;
-}
+// static bool valid_va(unsigned long addr)
+// {
+//     if (!(addr >> (PGDIR_SHIFT + 9)) && addr != 0)
+// 	return true;
+//     else
+// 	return false;
+// }
 
 static __u64 get_pebs_event(enum events e)
 {//edit by 100, 带宽的收集包括两者的读取量，还有写入量。
@@ -41,9 +42,9 @@ static __u64 get_pebs_event(enum events e)
 		// return REMOTE_DRAM_LLC_LOAD_MISS;
 	    // else
 		// return N_HTMMEVENTS;
-	case PERF_COUNT_HW_CPU_CYCLES:
+	case CPU_CYCLES:
 		return PERF_COUNT_HW_CPU_CYCLES;
-	case PERF_COUNT_HW_INSTRUCTIONS:
+	case INSTRUCTIONS:
 		return PERF_COUNT_HW_INSTRUCTIONS;
 	default:
 	    return N_HTMMEVENTS;
@@ -60,7 +61,7 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     memset(&attr, 0, sizeof(struct perf_event_attr));
 
 	if(config != PERF_COUNT_HW_CPU_CYCLES && config != PERF_COUNT_HW_INSTRUCTIONS){
-		// 要检测的类型有硬件和自定义类，因为原本的自定义类型表现的很好
+		// 要检测的类型有硬件和自定义类，因为原本的自定义类型表现的很好所以保留
 		attr.type = PERF_TYPE_RAW; 
 	}else{
 		attr.type = PERF_TYPE_HARDWARE; 
@@ -68,12 +69,14 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     attr.size = sizeof(struct perf_event_attr);
     attr.config = config; //要监测的采样事件
     attr.config1 = config1;
-	// 采样事件间隔
-    if (config == ALL_STORES)
-		attr.sample_period = htmm_inst_sample_period;
-    else
-		attr.sample_period = get_sample_period(0);
-    attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID; //要采样的信息是什么，IP就是对应的值，TID先保留看需不需要过滤线程
+
+	attr.sample_period = 100007;
+	// 采样事件间隔，这里将其设计为一个固定的值，其实就是把htmm_inst_sample_period的值拿出来了而已
+    // if (config == ALL_STORES)
+	// 	attr.sample_period = htmm_inst_sample_period;
+    // else
+	// 	attr.sample_period = get_sample_period(0);
+    attr.sample_type = PERF_SAMPLE_IP; //要采样的信息是什么，IP就是对应的值，TID先保留看需不需要过滤线程， | PERF_SAMPLE_TID
     attr.disabled = 0;
     attr.exclude_kernel = 1;
     attr.exclude_hv = 1;
@@ -109,16 +112,16 @@ static int pebs_init(pid_t pid, int node)
 
     mem_event = kzalloc(sizeof(struct perf_event **) * CPUS_PER_SOCKET, GFP_KERNEL);
     for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
-	mem_event[cpu] = kzalloc(sizeof(struct perf_event *) * N_HTMMEVENTS, GFP_KERNEL);
+		mem_event[cpu] = kzalloc(sizeof(struct perf_event *) * N_HTMMEVENTS, GFP_KERNEL);
     }
     
-    printk("pebs_init\n");   
+    // printk("pebs_init\n");   
     for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 	for (event = 0; event < N_HTMMEVENTS; event++) { 
-	//要先确定有多少个cpu核心，还要确定哪些事件是根据cpu核心来确定的
-	//在设计的Q-Table表里，应该都是根据CPU核心来确定的
-	//ubuntu20那台是旧服务器12个核心一个socket，而新电脑ubuntu18那台是28个核心
-	// 都能跑的原因应该是运行脚本里写了限制task数目来着。
+	/*要先确定有多少个cpu核心，还要确定哪些事件是根据cpu核心来确定的
+	在设计的Q-Table表里，应该都是根据CPU核心来确定的
+	ubuntu20那台是旧服务器12个核心一个socket，而新电脑ubuntu18那台是28个核心
+	都能跑的原因应该是运行脚本里写了限制task数目来着。*/
 	    if (get_pebs_event(event) == N_HTMMEVENTS) {
 			mem_event[cpu][event] = NULL;
 			continue;
@@ -138,11 +141,11 @@ static void pebs_disable(void)
 {
     int cpu, event;
 
-    printk("pebs disable\n");
+    // printk("pebs disable\n");
     for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 	for (event = 0; event < N_HTMMEVENTS; event++) {
 	    if (mem_event[cpu][event])
-		perf_event_disable(mem_event[cpu][event]);
+			perf_event_disable(mem_event[cpu][event]);
 	}
     }
 }
@@ -151,75 +154,76 @@ static void pebs_enable(void)
 {
     int cpu, event;
 
-    printk("pebs enable\n");
+    // printk("pebs enable\n");
     for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 	for (event = 0; event < N_HTMMEVENTS; event++) {
 	    if (mem_event[cpu][event])
-		perf_event_enable(mem_event[cpu][event]);
+			perf_event_enable(mem_event[cpu][event]);
 	}
     }
 }
 
-static void pebs_update_period(uint64_t value, uint64_t inst_value)
-{
-    int cpu, event;
+// static void pebs_update_period(uint64_t value, uint64_t inst_value)
+// {
+//     int cpu, event;
 
-    for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
-	for (event = 0; event < N_HTMMEVENTS; event++) {
-	    int ret;
-	    if (!mem_event[cpu][event])
-		continue;
+//     for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
+// 	for (event = 0; event < N_HTMMEVENTS; event++) {
+// 	    int ret;
+// 	    if (!mem_event[cpu][event])
+// 		continue;
 
-	    switch (event) {
-		case DRAMREAD:
-		case NVMREAD:
-		case CXLREAD:
-		    ret = perf_event_period(mem_event[cpu][event], value);
-		    break;
-		case MEMWRITE:
-		    ret = perf_event_period(mem_event[cpu][event], inst_value);
-		    break;
-		default:
-		    ret = 0;
-		    break;
-	    }
+// 	    switch (event) {
+// 		case DRAMREAD:
+// 		case NVMREAD:
+// 		case CXLREAD:
+// 		    ret = perf_event_period(mem_event[cpu][event], value);
+// 		    break;
+// 		case MEMWRITE:
+// 		    ret = perf_event_period(mem_event[cpu][event], inst_value);
+// 		    break;
+// 		default:
+// 		    ret = 0;
+// 		    break;
+// 	    }
 
-	    if (ret == -EINVAL)
-		printk("failed to update sample period");
-	}
-    }
-}
+// 	    if (ret == -EINVAL)
+// 		printk("failed to update sample period");
+// 	}
+//     }
+// }
 
 static int ksamplingd(void *data)
 {
 	//edit by 100, 计算页面数量
-    unsigned long long nr_sampled = 0, nr_dram = 0, nr_nvm = 0, nr_write = 0;
+    // unsigned long long nr_sampled = 0, nr_dram = 0, nr_nvm = 0, nr_write = 0;
+	unsigned long long nr_bw = 0, nr_cyc = 0, nr_ins = 0;
     unsigned long long nr_throttled = 0, nr_lost = 0, nr_unknown = 0;
-    unsigned long long nr_skip = 0;
+    // unsigned long long nr_skip = 0;
 
     /* used for calculating average cpu usage of ksampled 计算CPU开销，用于改变采样周期来着 */
-    struct task_struct *t = current;
+    // struct task_struct *t = current;
     /* a unit of cputime: permil (1/1000) */
-    u64 total_runtime, exec_runtime, cputime = 0;
-    unsigned long total_cputime, elapsed_cputime, cur;
+    // u64 total_runtime, exec_runtime, cputime = 0;
+    // unsigned long total_cputime, elapsed_cputime, cur;
     /* used for periodic checks*/
-    unsigned long cpucap_period = msecs_to_jiffies(15000); // 15s
-    unsigned long sample_period = 0;
-    unsigned long sample_inst_period = 0;
+    // unsigned long cpucap_period = msecs_to_jiffies(15000); // 15s
+    // unsigned long sample_period = 0;
+    // unsigned long sample_inst_period = 0;
     /* report cpu/period stat */
-    unsigned long trace_cputime, trace_period = msecs_to_jiffies(1500); // 3s
-    unsigned long trace_runtime;
+    // unsigned long trace_cputime, trace_period = msecs_to_jiffies(1500); // 3s
+    // unsigned long trace_runtime;
     /* for timeout */ 
-    unsigned long sleep_timeout;
+    // unsigned long sleep_timeout;
 
     /* for analytic purpose */
-    unsigned long hr_dram = 0, hr_nvm = 0;
+    // unsigned long hr_dram = 0, hr_nvm = 0;
 
     /* orig impl: see read_sum_exec_runtime() */
-    trace_runtime = total_runtime = exec_runtime = t->se.sum_exec_runtime;
+    // trace_runtime = total_runtime = exec_runtime = t->se.sum_exec_runtime;
 
-    trace_cputime = total_cputime = elapsed_cputime = jiffies;
-    sleep_timeout = usecs_to_jiffies(2000);
+    // trace_cputime = total_cputime = elapsed_cputime = jiffies;
+    // sleep_timeout = usecs_to_jiffies(2000);
 
     /* TODO implements per-CPU node ksampl ingd by using pg_data_t */
     /* Currently uses a single CPU node(0) */
@@ -237,6 +241,7 @@ static int ksamplingd(void *data)
 	
 		for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 			for (event = 0; event < N_HTMMEVENTS; event++) {
+				//处理某个cpu的某个事件的采样缓冲区数据
 				do {
 					struct perf_buffer *rb;
 					struct perf_event_mmap_page *up;
@@ -247,11 +252,11 @@ static int ksamplingd(void *data)
 					__u64 head;
 	
 					if (!mem_event[cpu][event]) {
-						//continue;
+						//continue;这个是个二维指针，指向的就是之前采样采的fd->private,一个ring buff
 						break;
 					}
 
-					__sync_synchronize();
+					__sync_synchronize(); // 进行内存屏障操作，确保之前的内存操作完成。
 
 					rb = mem_event[cpu][event]->rb;
 					if (!rb) {
@@ -261,13 +266,15 @@ static int ksamplingd(void *data)
 					/* perf_buffer is ring buffer */
 					up = READ_ONCE(rb->user_page);
 					head = READ_ONCE(up->data_head);
-					if (head == up->data_tail) {
-						if (cpu < 16)
-							nr_skip++;
+					if (head == up->data_tail) { // 检查环形缓冲区是否有新数据（即头尾指针不相等）
+						// if (cpu < 16) //为啥是16啊？
+						// 	nr_skip++;
 						//continue;
 						break;
 					}
 
+					/* 计算环形缓冲区中未处理的数据量（head - data_tail），
+					并根据这个差值与预设的最大和最小采样率比较，设置条件变量 cond*/
 					head -= up->data_tail;
 					if (head > (BUFFER_SIZE * ksampled_max_sample_ratio / 100)) {
 						cond = true;
@@ -275,56 +282,68 @@ static int ksamplingd(void *data)
 						cond = false;
 					}
 
-					/* read barrier */
+					/* read barrier 确保之前的读操作被正确执行和完成，以防止编译器或处理器重排序。*/
 					smp_rmb();
 
+					/*根据环形缓冲区的页面序号（page_order）和偏移量，
+					计算出当前需要处理的采样数据的具体内存位置。*/
 					page_shift = PAGE_SHIFT + page_order(rb);
 					/* get address of a tail sample */
 					offset = READ_ONCE(up->data_tail);
 					pg_index = (offset >> page_shift) & (rb->nr_pages - 1);
 					offset &= (1 << page_shift) - 1;
 
+					/*处理采样数据：根据采样数据头（ph->type）的类型，执行不同的操作。
+					这可能包括更新页面信息、统计不同类型事件的发生次数
+					（如DRAM读取、NVM读取或写入操作）、记录节流或丢失的样本等。*/
 					ph = (void*)(rb->data_pages[pg_index] + offset);
 					switch (ph->type) {
+						// 性能采样数据。应该一般都是这个状态，我看模板也是从这里拿的
 						case PERF_RECORD_SAMPLE:
 							he = (struct htmm_event *)ph;
-							if (!valid_va(he->addr)) {
-								break;
-							}
+							// if (!valid_va(he->addr)) {
+							// 	break;
+							// }
 
-							update_pginfo(he->pid, he->addr, event);
-							//count_vm_event(HTMM_NR_SAMPLED);
-							nr_sampled++;
+							// 重点句，并且这句没有更新在这里，说明在其他文件！那边Q-Table搜索可同理
+							// update_pginfo(he->pid, he->addr, event);
+							// nr_sampled++;
 
-							if (event == DRAMREAD) {
-								nr_dram++;
-								hr_dram++;
+							if (event == DRAMREAD || event == MEMWRITE) {
+								nr_bw += he->ip;
 							}
-							else if (event == CXLREAD || event == NVMREAD) {
-								nr_nvm++;
-								hr_nvm++;
+							else if (event == CPU_CYCLES) {
+								nr_cyc += he->ip;;
 							}
-							else
-								nr_write++;
+							else if(event == INSTRUCTIONS){
+								nr_ins += he->ip;
+							}
+								
 							break;
+						// 节流（减少数据采集频率）
 						case PERF_RECORD_THROTTLE:
+						// 解除节流（增加数据采集频率）的记录，统计这些事件的发生次数。
 						case PERF_RECORD_UNTHROTTLE:
 							nr_throttled++;
 							break;
+						//处理丢失的样本事件
 						case PERF_RECORD_LOST_SAMPLES:
 							nr_lost ++;
 							break;
 						default:
+						//处理未知类型事件
 							nr_unknown++;
 							break;
 					}
-					if (nr_sampled % 500000 == 0) {
-						trace_printk("nr_sampled: %llu, nr_dram: %llu, nr_nvm: %llu, nr_write: %llu, nr_throttled: %llu \n", nr_sampled, nr_dram, nr_nvm, nr_write,nr_throttled);
-						nr_dram = 0;
-						nr_nvm = 0;
-						nr_write = 0;
-					}
-					/* read, write barrier */
+					//在处理了特定数量（500000）的样本后，打印统计信息，并重置部分计数器。
+					// if (nr_sampled % 500000 == 0) {
+					// 	trace_printk("nr_sampled: %llu, nr_dram: %llu, nr_nvm: %llu, nr_write: %llu, nr_throttled: %llu \n", nr_sampled, nr_dram, nr_nvm, nr_write,nr_throttled);
+					// 	nr_dram = 0;
+					// 	nr_nvm = 0;
+					// 	nr_write = 0;
+					// }
+					update_stats(nr_bw, nr_cyc, nr_ins);
+					/* read, write barrier 确保所有先前的写操作完成，然后更新环形缓冲区的 data_tail，以指向下一个待处理的采样数据的位置。*/
 					smp_mb();
 					WRITE_ONCE(up->data_tail, up->data_tail + ph->size);
 				} while (cond);
@@ -338,64 +357,64 @@ static int ksamplingd(void *data)
 		schedule_timeout_interruptible(sleep_timeout);
 
 		/* check elasped time 这里也是在调整采样的事件间隔*/
-		cur = jiffies;
-		if ((cur - elapsed_cputime) >= cpucap_period) {
-			u64 cur_runtime = t->se.sum_exec_runtime;
-			exec_runtime = cur_runtime - exec_runtime; //ns
-			elapsed_cputime = jiffies_to_usecs(cur - elapsed_cputime); //us
-			if (!cputime) {
-				u64 cur_cputime = div64_u64(exec_runtime, elapsed_cputime);
+		// cur = jiffies;
+		// if ((cur - elapsed_cputime) >= cpucap_period) {
+		// 	u64 cur_runtime = t->se.sum_exec_runtime;
+		// 	exec_runtime = cur_runtime - exec_runtime; //ns
+		// 	elapsed_cputime = jiffies_to_usecs(cur - elapsed_cputime); //us
+		// 	if (!cputime) {
+		// 		u64 cur_cputime = div64_u64(exec_runtime, elapsed_cputime);
 				// EMA with the scale factor (0.2)
-				cputime = ((cur_cputime << 3) + (cputime << 1)) / 10;
-			} else
-				cputime = div64_u64(exec_runtime, elapsed_cputime);
+			// 	cputime = ((cur_cputime << 3) + (cputime << 1)) / 10;
+			// } else
+			// 	cputime = div64_u64(exec_runtime, elapsed_cputime);
 
 			/* to prevent frequent updates, allow for a slight variation of +/- 0.5% */
-			if (cputime > (ksampled_soft_cpu_quota + 5) &&
-				sample_period != pcount) {
+			// if (cputime > (ksampled_soft_cpu_quota + 5) &&
+			// 	sample_period != pcount) {
 				/* need to increase the sample period */
 				/* only increase by 1 */
-				unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
-				increase_sample_period(&sample_period, &sample_inst_period);
-			if (tmp1 != sample_period || tmp2 != sample_inst_period)
-				pebs_update_period(get_sample_period(sample_period),get_sample_inst_period(sample_inst_period));
-			} else if (cputime < (ksampled_soft_cpu_quota - 5) && sample_period) {
-				unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
-				decrease_sample_period(&sample_period, &sample_inst_period);
-				if (tmp1 != sample_period || tmp2 != sample_inst_period)
-					pebs_update_period(get_sample_period(sample_period),get_sample_inst_period(sample_inst_period));
-			}
+			// 	unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
+			// 	increase_sample_period(&sample_period, &sample_inst_period);
+			// if (tmp1 != sample_period || tmp2 != sample_inst_period)
+			// 	pebs_update_period(get_sample_period(sample_period),get_sample_inst_period(sample_inst_period));
+			// } else if (cputime < (ksampled_soft_cpu_quota - 5) && sample_period) {
+			// 	unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
+			// 	decrease_sample_period(&sample_period, &sample_inst_period);
+			// 	if (tmp1 != sample_period || tmp2 != sample_inst_period)
+			// 		pebs_update_period(get_sample_period(sample_period),get_sample_inst_period(sample_inst_period));
+			// }
 			/* does it need to prevent ping-pong behavior? */
 	    
-			elapsed_cputime = cur;
-			exec_runtime = cur_runtime;
+			// elapsed_cputime = cur;
+			// exec_runtime = cur_runtime;
 		}
 
 			/* This is used for reporting the sample period and cputime */
-		if (cur - trace_cputime >= trace_period) {
-			unsigned long hr = 0;
-			u64 cur_runtime = t->se.sum_exec_runtime;
-			trace_runtime = cur_runtime - trace_runtime;
-			trace_cputime = jiffies_to_usecs(cur - trace_cputime);
-			trace_cputime = div64_u64(trace_runtime, trace_cputime);
+		// if (cur - trace_cputime >= trace_period) {
+		// 	unsigned long hr = 0;
+		// 	u64 cur_runtime = t->se.sum_exec_runtime;
+		// 	trace_runtime = cur_runtime - trace_runtime;
+		// 	trace_cputime = jiffies_to_usecs(cur - trace_cputime);
+		// 	trace_cputime = div64_u64(trace_runtime, trace_cputime);
 	    
-			if (hr_dram + hr_nvm == 0)
-				hr = 0;
-			else
-				hr = hr_dram * 10000 / (hr_dram + hr_nvm);
-			trace_printk("sample_period: %lu || cputime: %lu  || hit ratio: %lu\n",get_sample_period(sample_period), trace_cputime, hr);
+		// 	if (hr_dram + hr_nvm == 0)
+		// 		hr = 0;
+		// 	else
+		// 		hr = hr_dram * 10000 / (hr_dram + hr_nvm);
+		// 	trace_printk("sample_period: %lu || cputime: %lu  || hit ratio: %lu\n",get_sample_period(sample_period), trace_cputime, hr);
 	    
-			hr_dram = hr_nvm = 0;
-			trace_cputime = cur;
-			trace_runtime = cur_runtime;
-		}
+		// 	hr_dram = hr_nvm = 0;
+		// 	trace_cputime = cur;
+		// 	trace_runtime = cur_runtime;
+		// }
     }
 
-    total_runtime = (t->se.sum_exec_runtime) - total_runtime; // ns
-    total_cputime = jiffies_to_usecs(jiffies - total_cputime); // us
+    // total_runtime = (t->se.sum_exec_runtime) - total_runtime; // ns
+    // total_cputime = jiffies_to_usecs(jiffies - total_cputime); // us
 
-    printk("nr_sampled: %llu, nr_throttled: %llu, nr_lost: %llu\n", nr_sampled, nr_throttled, nr_lost);
-    printk("total runtime: %llu ns, total cputime: %lu us, cpu usage: %llu\n",total_runtime, total_cputime, (total_runtime) / total_cputime);
+    // printk("nr_sampled: %llu, nr_throttled: %llu, nr_lost: %llu\n", nr_sampled, nr_throttled, nr_lost);
+    // printk("total runtime: %llu ns, total cputime: %lu us, cpu usage: %llu\n",total_runtime, total_cputime, (total_runtime) / total_cputime);
 
     return 0;
 }
@@ -405,11 +424,11 @@ static int ksamplingd_run(void)
     int err = 0;
     
     if (!access_sampling) {
-	access_sampling = kthread_run(ksamplingd, NULL, "ksamplingd");
-	if (IS_ERR(access_sampling)) {
-	    err = PTR_ERR(access_sampling);
-	    access_sampling = NULL;
-	}
+		access_sampling = kthread_run(ksamplingd, NULL, "ksamplingd");
+		if (IS_ERR(access_sampling)) {
+	    	err = PTR_ERR(access_sampling);
+	    	access_sampling = NULL;
+		}
     }
     return err;
 }
@@ -419,12 +438,12 @@ int ksamplingd_init(pid_t pid, int node)
     int ret;
 
     if (access_sampling)
-	return 0;
+		return 0;
 
     ret = pebs_init(pid, node);
     if (ret) {
-	printk("htmm__perf_event_init failure... ERROR:%d\n", ret);
-	return 0;
+		printk("htmm__perf_event_init failure... ERROR:%d\n", ret);
+		return 0;
     }
 
     return ksamplingd_run();
@@ -433,8 +452,8 @@ int ksamplingd_init(pid_t pid, int node)
 void ksamplingd_exit(void)
 {
     if (access_sampling) {
-	kthread_stop(access_sampling);
-	access_sampling = NULL;
+		kthread_stop(access_sampling);
+		access_sampling = NULL;
     }
     pebs_disable();
 }

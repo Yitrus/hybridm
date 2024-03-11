@@ -850,6 +850,7 @@ lru_unlock:
 	BUG();
 }
 
+//当采样获取虚拟地址后，就一直在页表遍历，最后更新页面信息
 static void update_base_page(struct vm_area_struct *vma,
 	struct page *page, pginfo_t *pginfo)
 {
@@ -858,47 +859,59 @@ static void update_base_page(struct vm_area_struct *vma,
     bool hot;
 
     /* check cooling status and perform cooling if the page needs to be cooled */
-    check_base_cooling(pginfo, page, false);
+    // 检查给定页面是否需要冷却（即是否过热），并根据需要执行冷却操作。
+	check_base_cooling(pginfo, page, false);
 
+	// 对页面的访问计数进行更新。nr_accesses 是页面被访问的次数，
+	// 而 total_accesses 是页面的总访问量，
+	// 这里通过增加 HPAGE_PMD_NR（通常代表一个大页面中小页面的数量）
+	// 来模拟大页面的访问计数。
     prev_accessed = pginfo->total_accesses;
     pginfo->nr_accesses++;
     pginfo->total_accesses += HPAGE_PMD_NR;
     
+	// 更新内存组（memcg）的热度记录
     prev_idx = get_idx(prev_accessed);
     cur_idx = get_idx(pginfo->total_accesses);
 
     spin_lock(&memcg->access_lock);
 
+	// 热度直方图
     if (prev_idx != cur_idx) {
-	if (memcg->hotness_hg[prev_idx] > 0)
-	    memcg->hotness_hg[prev_idx]--;
-	memcg->hotness_hg[cur_idx]++;
+		if (memcg->hotness_hg[prev_idx] > 0)
+	    	memcg->hotness_hg[prev_idx]--;
+		memcg->hotness_hg[cur_idx]++;
 
-	if (memcg->ebp_hotness_hg[prev_idx] > 0)
-	    memcg->ebp_hotness_hg[prev_idx]--;
-	memcg->ebp_hotness_hg[cur_idx]++;
+		if (memcg->ebp_hotness_hg[prev_idx] > 0)
+	    	memcg->ebp_hotness_hg[prev_idx]--;
+		memcg->ebp_hotness_hg[cur_idx]++;
     }
 
     if (pginfo->may_hot == true)
-	memcg->max_dram_sampled++;
+		memcg->max_dram_sampled++;
     if (cur_idx >= (memcg->bp_active_threshold))
-	pginfo->may_hot = true;
+		pginfo->may_hot = true;
     else
-	pginfo->may_hot = false;
+		pginfo->may_hot = false;
 
     spin_unlock(&memcg->access_lock);
 
+	/*    根据页面当前的热度和内存组设定的活跃阈值（active_threshold），
+	判断页面是否应该标记为活跃。
+    如果页面应该从活跃状态变为非活跃，或者反之，相应地移动
+	页面到活跃或非活跃的LRU列表中。这有助于内存管理子系统
+	根据页面的访问频率和热度，决定页面的回收优先级。*/
     hot = cur_idx >= memcg->active_threshold;
     
     if (PageActive(page) && !hot)
-	move_page_to_inactive_lru(page);
+		move_page_to_inactive_lru(page);
     else if (!PageActive(page) && hot)
-	move_page_to_active_lru(page);
+		move_page_to_active_lru(page);
     
     if (hot)
-	move_page_to_active_lru(page);
+		move_page_to_active_lru(page);
     else if (PageActive(page))
-	move_page_to_inactive_lru(page);
+		move_page_to_inactive_lru(page);
 }
 
 static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
@@ -929,7 +942,11 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
     }
 #endif
 
-    /*subpage */
+    /*subpage     递增巨页的访问计数器（nr_accesses 和 total_accesses），
+	以及元数据页的总访问量。
+    如果启用了对巨页的延迟分裂处理
+	（DEFERRED_SPLIT_ISOLATED 未定义），
+	并且检查指示需要分裂，则将页面移动到延迟分裂队列。*/
     prev_idx = get_idx(pginfo_prev);
     cur_idx = get_idx(pginfo->total_accesses);
     spin_lock(&memcg->access_lock);
@@ -965,19 +982,23 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
     if (pg_split)
 	return;
 
+	/*根据页面的热度（是否达到活跃阈值）和当前状态
+	（是否已经在活跃或非活跃的LRU列表中），
+	决定是否需要移动页面以反映其最新的活跃状态。*/
     hot = cur_idx >= memcg->active_threshold;
     if (PageActive(page) && !hot) {
-	move_page_to_inactive_lru(page);
+		move_page_to_inactive_lru(page);
     } else if (!PageActive(page) && hot) {
-	move_page_to_active_lru(page);
+		move_page_to_active_lru(page);
     }
     
     if (hot)
-	move_page_to_active_lru(page);
+		move_page_to_active_lru(page);
     else if (PageActive(page))
-	move_page_to_inactive_lru(page);
+		move_page_to_inactive_lru(page);
 }
 
+//最底层的处理函数，直接对PTE层进行操作。它定位到具体的PTE.
 static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
 				unsigned long address)
 {
@@ -990,36 +1011,36 @@ static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
     pte = pte_offset_map_lock(vma->vm_mm, pmd, address, &ptl);
     ptent = *pte;
     if (!pte_present(ptent))
-	goto pte_unlock;
+		goto pte_unlock;
 
     page = vm_normal_page(vma, address, ptent);
     if (!page || PageKsm(page))
-	goto pte_unlock;
+		goto pte_unlock;
 
     if (page != compound_head(page))
-	goto pte_unlock;
+		goto pte_unlock;
 
     pte_page = virt_to_page((unsigned long)pte);
     if (!PageHtmm(pte_page))
-	goto pte_unlock;
+		goto pte_unlock;
 
     pginfo = get_pginfo_from_pte(pte);
     if (!pginfo)
-	goto pte_unlock;
+		goto pte_unlock;
 
     update_base_page(vma, page, pginfo);
     pte_unmap_unlock(pte, ptl);
     if (htmm_cxl_mode) {
-	if (page_to_nid(page) == 0)
-	    return 1;
-	else
-	    return 2;
+		if (page_to_nid(page) == 0)
+	    	return 1;
+		else
+	    	return 2;
     }
     else {
-	if (node_is_toptier(page_to_nid(page)))
-	    return 1;
-	else
-	    return 2;
+		if (node_is_toptier(page_to_nid(page)))
+	    	return 1;
+		else
+	    	return 2;
     }
 
 pte_unlock:
@@ -1027,6 +1048,9 @@ pte_unlock:
     return ret;
 }
 
+// 处理给定地址的PMD层。它检查目标地址是否对应于一个巨页（huge page），
+//如果是，并且页满足特定条件（比如不是零页，且是复合页），则会直接更新这个巨页的信息。
+//如果地址对应的是普通页而不是巨页，该函数会调用 __update_pte_pginfo 来处理更低一级的页表项（PTE）层。
 static int __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
 				unsigned long address)
 {
@@ -1035,44 +1059,44 @@ static int __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
 
     pmd = pmd_offset(pud, address);
     if (!pmd || pmd_none(*pmd))
-	return ret;
+		return ret;
     
     if (is_swap_pmd(*pmd))
-	return ret;
+		return ret;
 
     if (!pmd_trans_huge(*pmd) && !pmd_devmap(*pmd) && unlikely(pmd_bad(*pmd))) {
-	pmd_clear_bad(pmd);
-	return ret;
+		pmd_clear_bad(pmd);
+		return ret;
     }
 
     pmdval = *pmd;
     if (pmd_trans_huge(pmdval) || pmd_devmap(pmdval)) {
-	struct page *page;
+		struct page *page;
 
-	if (is_huge_zero_pmd(pmdval))
-	    return ret;
+		if (is_huge_zero_pmd(pmdval))
+	    	return ret;
 	
-	page = pmd_page(pmdval);
-	if (!page)
-	    goto pmd_unlock;
+		page = pmd_page(pmdval);
+		if (!page)
+	    	goto pmd_unlock;
 	
-	if (!PageCompound(page)) {
-	    goto pmd_unlock;
-	}
+		if (!PageCompound(page)) {
+	    	goto pmd_unlock;
+		}
 
-	update_huge_page(vma, pmd, page, address);
-	if (htmm_cxl_mode) {
-	    if (page_to_nid(page) == 0)
-		return 1;
-	    else
-		return 2;
-	}
-	else {
-	    if (node_is_toptier(page_to_nid(page)))
-		return 1;
-	    else
-		return 2;
-	}
+		update_huge_page(vma, pmd, page, address);
+		if (htmm_cxl_mode) {
+	    	if (page_to_nid(page) == 0)
+				return 1;
+	    	else
+				return 2;
+		}
+		else {
+	    	if (node_is_toptier(page_to_nid(page)))
+				return 1;
+	    	else
+				return 2;
+		}
 pmd_unlock:
 	return 0;
     }
@@ -1081,6 +1105,7 @@ pmd_unlock:
     return __update_pte_pginfo(vma, pmd, address);
 }
 
+// 首先获取给定地址的页全局目录（PGD），然后基于此找到页上级目录（PUD）
 static int __update_pginfo(struct vm_area_struct *vma, unsigned long address)
 {
     pgd_t *pgd;
@@ -1089,15 +1114,15 @@ static int __update_pginfo(struct vm_area_struct *vma, unsigned long address)
 
     pgd = pgd_offset(vma->vm_mm, address);
     if (pgd_none_or_clear_bad(pgd))
-	return 0;
+		return 0;
     
     p4d = p4d_offset(pgd, address);
     if (p4d_none_or_clear_bad(p4d))
-	return 0;
+		return 0;
     
     pud = pud_offset(p4d, address);
     if (pud_none_or_clear_bad(pud))
-	return 0;
+		return 0;
     
     return __update_pmd_pginfo(vma, pud, address);
 }
@@ -1315,7 +1340,7 @@ static void __adjust_active_threshold(struct mm_struct *mm,
 	else
 	    memcg->warm_threshold = memcg->active_threshold;
     } else { // disable warm
-	memcg->warm_threshold = memcg->active_threshold;
+		memcg->warm_threshold = memcg->active_threshold;
     }
 }
 
@@ -1329,11 +1354,17 @@ static bool need_memcg_cooling (struct mem_cgroup *memcg)
     return false;
 }
 
+void update_stats(long long nr_bw, long long nr_cyc, long long nr_ins){
+	TODO:怎么得到我想要的cgroup,且重新定义cgroup的结构
+	memcg->
+}
+
 void update_pginfo(pid_t pid, unsigned long address, enum events e)
-{
+{ //处理采样数据之后的工作
     struct pid *pid_struct = find_get_pid(pid);
     struct task_struct *p = pid_struct ? pid_task(pid_struct, PIDTYPE_PID) : NULL;
     struct mm_struct *mm = p ? p->mm : NULL;
+	// 通过给定的进程ID（pid），找到对应的 pid_struct 和 task_struct，从而获取到进程的内存管理结构 mm_struct
     struct vm_area_struct *vma; 
     struct mem_cgroup *memcg;
     int ret;
@@ -1341,93 +1372,96 @@ void update_pginfo(pid_t pid, unsigned long address, enum events e)
     last_thres_adaptation= jiffies;
 
     if (htmm_mode == HTMM_NO_MIG)
-	goto put_task;
+		goto put_task;
 
     if (!mm) {
-	goto put_task;
+		goto put_task;
     }
 
     if (!mmap_read_trylock(mm))
-	goto put_task;
+		goto put_task;
 
     vma = find_vma(mm, address);
     if (unlikely(!vma))
-	goto mmap_unlock;
+		goto mmap_unlock;
     
     if (!vma->vm_mm || !vma_migratable(vma) ||
 	(vma->vm_file && (vma->vm_flags & (VM_READ | VM_WRITE)) == (VM_READ)))
-	goto mmap_unlock;
+		goto mmap_unlock;
     
+	// 地址有效性和迁移可能性检查，获取内存控制组信息
     memcg = get_mem_cgroup_from_mm(mm);
     if (!memcg || !memcg->htmm_enabled)
-	goto mmap_unlock;
+		goto mmap_unlock;
     
-    /* increase sample counts only for valid records */
+    /* increase sample counts only for valid records 对找到的内存区域调用 __update_pginfo 函数
+	进行具体的页面信息更新。根据返回值，更新内存控制组的样本计数器，包括DRAM样本和总样本计数。*/
     ret = __update_pginfo(vma, address);
     if (ret == 1) { /* memory accesses to DRAM */
-	memcg->nr_sampled++;
-	memcg->nr_sampled_for_split++;
-	memcg->nr_dram_sampled++;
-	memcg->nr_max_sampled++;
+		memcg->nr_sampled++;
+		memcg->nr_sampled_for_split++;
+		memcg->nr_dram_sampled++;
+		memcg->nr_max_sampled++;
     }
     else if (ret == 2) {
-	memcg->nr_sampled++;
-	memcg->nr_sampled_for_split++;
-	memcg->nr_max_sampled++;
+		memcg->nr_sampled++;
+		memcg->nr_sampled_for_split++;
+		memcg->nr_max_sampled++;
     } else
-	goto mmap_unlock;
+		goto mmap_unlock;
     
     /* cooling and split decision */
-    if (memcg->nr_sampled % htmm_cooling_period == 0 ||
-	    need_memcg_cooling(memcg)) {
+    // if (memcg->nr_sampled % htmm_cooling_period == 0 ||
+	//     need_memcg_cooling(memcg)) {
 	/* cooling -- updates thresholds and sets need_cooling flags */
-	if (__cooling(mm, memcg)) {
-	    unsigned long temp_rhr = memcg->prev_dram_sampled;
+	// if (__cooling(mm, memcg)) {
+	//     unsigned long temp_rhr = memcg->prev_dram_sampled;
 	    /* updates actual access stat */
-	    memcg->prev_dram_sampled >>= 1;
-	    memcg->prev_dram_sampled += memcg->nr_dram_sampled;
-	    memcg->nr_dram_sampled = 0;
+	    // memcg->prev_dram_sampled >>= 1;
+	    // memcg->prev_dram_sampled += memcg->nr_dram_sampled;
+	    // memcg->nr_dram_sampled = 0;
 	    /* updates estimated access stat */
-	    memcg->prev_max_dram_sampled >>= 1;
-	    memcg->prev_max_dram_sampled += memcg->max_dram_sampled;
-	    memcg->max_dram_sampled = 0;
+	    // memcg->prev_max_dram_sampled >>= 1;
+	    // memcg->prev_max_dram_sampled += memcg->max_dram_sampled;
+	    // memcg->max_dram_sampled = 0;
 
 	    /* split decision period */
 	    /* split should be performed after cooling due to skewness factor */
-	    if (!memcg->need_split && htmm_thres_split) {
-		unsigned long usage = page_counter_read(&memcg->memory);
+	    // if (!memcg->need_split && htmm_thres_split) {
+		// unsigned long usage = page_counter_read(&memcg->memory);
 		/* htmm_split_period: 2 by default
 		 * This means that the number of sampled records should 
 		 * exceed a quarter of the WSS
 		 */
-		usage >>= htmm_split_period;
+		// usage >>= htmm_split_period;
 		// the num. of samples must be larger than the fast tier size.
-		usage = max(usage, memcg->max_nr_dram_pages);
+		// usage = max(usage, memcg->max_nr_dram_pages);
 	    
-		if (memcg->nr_sampled_for_split > usage) {
+		// if (memcg->nr_sampled_for_split > usage) {
 		    /* if split is already performed in the previous
 		     * and rhr is not improved, stop split huge pages */
-		    if (memcg->split_happen) {
-			if (memcg->prev_dram_sampled < (temp_rhr * 103 / 100)) { // 3%
-			    htmm_thres_split = 0;
-			    goto mmap_unlock;
-			}
-		    }
-		    memcg->split_happen = false;
-		    memcg->need_split = true;
-		} else {
+		//     if (memcg->split_happen) {
+		// 	if (memcg->prev_dram_sampled < (temp_rhr * 103 / 100)) { // 3%
+		// 	    htmm_thres_split = 0;
+		// 	    goto mmap_unlock;
+		// 	}
+		//     }
+		//     memcg->split_happen = false;
+		//     memcg->need_split = true;
+		// } else {
 		    /* re-calculate split threshold due to cooling */
-		    memcg->nr_split = memcg->nr_split + memcg->nr_split_tail_idx;
-		    memcg->nr_split_tail_idx = 0;
-		    set_memcg_split_thres(memcg);
-		}
-	    }
-	    printk("total_accesses: %lu max_dram_hits: %lu cur_hits: %lu \n",
-		    memcg->nr_max_sampled, memcg->prev_max_dram_sampled, memcg->prev_dram_sampled);
-	    memcg->nr_max_sampled >>= 1;
-	}
-    }
-    /* threshold adaptation */
+		//     memcg->nr_split = memcg->nr_split + memcg->nr_split_tail_idx;
+		//     memcg->nr_split_tail_idx = 0;
+		//     set_memcg_split_thres(memcg);
+		// }
+	    // }
+	//     printk("total_accesses: %lu max_dram_hits: %lu cur_hits: %lu \n",
+	// 	    memcg->nr_max_sampled, memcg->prev_max_dram_sampled, memcg->prev_dram_sampled);
+	//     memcg->nr_max_sampled >>= 1;
+	// }
+    // }
+    /* threshold adaptation 根据样本数量达到另一个特定周期（htmm_adaptation_period），
+	调整活动页面的阈值，以优化内存访问性能。*/
     else if (memcg->nr_sampled % htmm_adaptation_period == 0) {
 	__adjust_active_threshold(mm, memcg);
     }
