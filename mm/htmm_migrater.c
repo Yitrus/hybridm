@@ -88,15 +88,17 @@ unsigned long get_memcg_demotion_watermark(unsigned long max_nr_pages)
 	return max_nr_pages;
 }
 
+// 如果是减的逻辑那么这部分watermark就是指不能用的
 unsigned long get_memcg_promotion_watermark(unsigned long max_nr_pages)
 {
-    max_nr_pages = max_nr_pages * 3 / 100; // 3%
-    if (max_nr_pages < MAX_WATERMARK_LOWER_LIMIT)
+	unsigned long long nr_minwatermark;
+    nr_minwatermark = max_nr_pages * 3 / 100; // 3%
+    if (nr_minwatermark < MAX_WATERMARK_LOWER_LIMIT)
 		return MIN_WATERMARK_LOWER_LIMIT;
-    else if (max_nr_pages > MAX_WATERMARK_UPPER_LIMIT)
+    else if (nr_minwatermark > MAX_WATERMARK_UPPER_LIMIT)
 		return MIN_WATERMARK_UPPER_LIMIT;
     else
-		return max_nr_pages;
+		return nr_minwatermark;
 }
 
 unsigned long get_nr_lru_pages_node(struct mem_cgroup *memcg, pg_data_t *pgdat)
@@ -192,7 +194,7 @@ static bool promotion_available(int target_nid, struct mem_cgroup *memcg,
     max_nr_pages = memcg->nodeinfo[target_nid]->max_nr_base_pages; //这个内存控制组在这个节点总的basic page数量
     nr_isolated = node_page_state(pgdat, NR_ISOLATED_ANON) + node_page_state(pgdat, NR_ISOLATED_FILE); //不在lru的
     
-    fasttier_max_watermark = get_memcg_promotion_watermark(max_nr_pages); //watermark
+    fasttier_max_watermark = get_memcg_promotion_watermark(max_nr_pages); //watermark，是指保持最小空闲页面数
 
     if (max_nr_pages == ULONG_MAX) {
 		*nr_to_promote = node_free_pages(pgdat);
