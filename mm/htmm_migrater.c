@@ -92,11 +92,11 @@ unsigned long get_memcg_promotion_watermark(unsigned long max_nr_pages)
 {
     max_nr_pages = max_nr_pages * 3 / 100; // 3%
     if (max_nr_pages < MAX_WATERMARK_LOWER_LIMIT)
-	return MIN_WATERMARK_LOWER_LIMIT;
+		return MIN_WATERMARK_LOWER_LIMIT;
     else if (max_nr_pages > MAX_WATERMARK_UPPER_LIMIT)
-	return MIN_WATERMARK_UPPER_LIMIT;
+		return MIN_WATERMARK_UPPER_LIMIT;
     else
-	return max_nr_pages;
+		return max_nr_pages;
 }
 
 unsigned long get_nr_lru_pages_node(struct mem_cgroup *memcg, pg_data_t *pgdat)
@@ -108,7 +108,7 @@ unsigned long get_nr_lru_pages_node(struct mem_cgroup *memcg, pg_data_t *pgdat)
     lruvec = mem_cgroup_lruvec(memcg, pgdat);
 
     for_each_lru(lru)
-	nr_pages += lruvec_lru_size(lruvec, lru, MAX_NR_ZONES);
+		nr_pages += lruvec_lru_size(lruvec, lru, MAX_NR_ZONES);
    
     return nr_pages;
 }
@@ -123,7 +123,7 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
     lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
     
     if (htmm_mode == HTMM_NO_MIG)
-	return 0;
+		return 0;
 
     return lruvec_size;
 }
@@ -174,6 +174,7 @@ static unsigned long node_free_pages(pg_data_t *pgdat)
     return (unsigned long)total;
 }
 
+// 这个函数用于反映DRAM层还剩下多少空间
 static bool promotion_available(int target_nid, struct mem_cgroup *memcg,
 	unsigned long long *nr_to_promote)
 {
@@ -183,24 +184,23 @@ static bool promotion_available(int target_nid, struct mem_cgroup *memcg,
     unsigned long fasttier_max_watermark;
 
     if (target_nid == NUMA_NO_NODE)
-	return false;
+		return false;
     
     pgdat = NODE_DATA(target_nid);
 
-    cur_nr_pages = get_nr_lru_pages_node(memcg, pgdat);
-    max_nr_pages = memcg->nodeinfo[target_nid]->max_nr_base_pages;
-    nr_isolated = node_page_state(pgdat, NR_ISOLATED_ANON) +
-		  node_page_state(pgdat, NR_ISOLATED_FILE);
+    cur_nr_pages = get_nr_lru_pages_node(memcg, pgdat); //lru上的数量
+    max_nr_pages = memcg->nodeinfo[target_nid]->max_nr_base_pages; //这个内存控制组在这个节点总的basic page数量
+    nr_isolated = node_page_state(pgdat, NR_ISOLATED_ANON) + node_page_state(pgdat, NR_ISOLATED_FILE); //不在lru的
     
-    fasttier_max_watermark = get_memcg_promotion_watermark(max_nr_pages);
+    fasttier_max_watermark = get_memcg_promotion_watermark(max_nr_pages); //watermark
 
     if (max_nr_pages == ULONG_MAX) {
-	*nr_to_promote = node_free_pages(pgdat);
-	return true;
+		*nr_to_promote = node_free_pages(pgdat);
+		return true;
     }
     else if (cur_nr_pages + nr_isolated < max_nr_pages - fasttier_max_watermark) {
-	*nr_to_promote = max_nr_pages - fasttier_max_watermark - cur_nr_pages - nr_isolated;
-	return true;
+		*nr_to_promote = max_nr_pages - fasttier_max_watermark - cur_nr_pages - nr_isolated;
+		return true;
     }
     return false;
 }
@@ -580,23 +580,6 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 		priority--;
     } while (priority);
 
-    // if (htmm_nowarm == 0) {
-	// int target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
-	// unsigned long nr_lowertier_active =
-	    // target_nid == NUMA_NO_NODE ? 0: need_lowertier_promotion(NODE_DATA(target_nid), memcg);
-	
-	// nr_lowertier_active = nr_lowertier_active < nr_to_reclaim ?
-			// nr_lowertier_active : nr_to_reclaim;
-	// if (nr_lowertier_active && nr_reclaimed < nr_lowertier_active)
-	    // memcg->warm_threshold = memcg->active_threshold;
-    // }
-
-    /* check the condition */
-    // do {
-		// unsigned long max = memcg->nodeinfo[pgdat->node_id]->max_nr_base_pages;
-		// if (get_nr_lru_pages_node(memcg, pgdat) + get_memcg_demotion_watermark(max) < max)
-	    // WRITE_ONCE(memcg->nodeinfo[pgdat->node_id]->need_demotion, false);
-    // } while (0);
     return nr_reclaimed;
 }
 
@@ -617,13 +600,16 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 		lru = LRU_INACTIVE_ANON;
 		nr_to_promote = min(tmp, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
     }
+
+	printk("___get the promoted %llu___", nr_to_promote);
+
     do {
 		nr_promoted += promote_lruvec(nr_to_promote, priority, pgdat, lruvec, lru);
 		if (nr_promoted >= nr_to_promote)
 	    	break;
 		priority--;
     } while (priority);
-    
+
     return nr_promoted;
 }
 
@@ -683,8 +669,8 @@ static int kmigraterd(void *p)
 		}
 		pn = next_memcg_cand(pgdat); // 虽然目前不太清楚这个内存控制组是怎么得到的
 	    //但是由于内存控制组是全局的，从DRAM节点也能遍历得到也属于PM节点的cgroup
-		if (!pn) { // 如果没有内存控制组就睡眠1s
-	        msleep_interruptible(1000);
+		if (!pn) { // 如果没有内存控制组就睡眠2s
+	        msleep_interruptible(2000);
 	        continue;
 	    }
 
@@ -698,13 +684,13 @@ static int kmigraterd(void *p)
 	    }
 	
 		get_best_action(&nr_action);
-		printk("get the actoin %d", nr_action);
 		if(!nr_action){ //如果有行动的话
 			promotion_available(nid, memcg, &nr_available);
 			tmp_demotion  = (unsigned long long)nr_action-nr_available;
+			printk("___get the available %llu___", nr_available);
 			if(tmp_demotion >0 && tmp_demotion <= INT_MAX){
 				nr_demotion = (int)tmp_demotion; //有可能不会降级那么多，相应能升级的就要更少，但不需要知道具体的数，因为迁移上去的页面由当时空多少决定
-				printk("get the demotion %d", nr_demotion);//大于0的话就需要降级，降级操作是由DRAM node做的
+				printk("___get the demotion %d___", nr_demotion);//大于0的话就需要降级，降级操作是由DRAM node做的
 				kmigraterd_demotion(pgdat, memcg, nr_demotion);
 			}
 			//升级，升级操作是由PM node做的
