@@ -77,22 +77,23 @@ void del_memcg_from_kmigraterd(struct mem_cgroup *memcg, int nid)
     spin_unlock(&pgdat->kmigraterd_lock);
 }
 
+//这个返回的是DRAM要保留的水印，如果剩下的页面数量比这个小就要迁移了
 unsigned long get_memcg_demotion_watermark(unsigned long max_nr_pages)
 {
     max_nr_pages = max_nr_pages * 2 / 100; // 2%
     if (max_nr_pages < MIN_WATERMARK_LOWER_LIMIT)
-	return MIN_WATERMARK_LOWER_LIMIT;
+		return MIN_WATERMARK_LOWER_LIMIT;
     else if (max_nr_pages > MIN_WATERMARK_UPPER_LIMIT)
-	return MIN_WATERMARK_UPPER_LIMIT;
+		return MIN_WATERMARK_UPPER_LIMIT;
     else
-	return max_nr_pages;
+		return max_nr_pages;
 }
 
-// 如果是减的逻辑那么这部分watermark就是指不能用的
+// 如果是减的逻辑那么这部分watermark就是指不能用的，要保留的页面数量
 unsigned long get_memcg_promotion_watermark(unsigned long max_nr_pages)
 {
 	unsigned long long nr_minwatermark;
-    nr_minwatermark = max_nr_pages * 3 / 100; // 3%
+    nr_minwatermark = max_nr_pages * 3 / 100; // 3%但是这个也太多了吧，为啥其他都是一个具体的数字，
     if (nr_minwatermark < MAX_WATERMARK_LOWER_LIMIT)
 		return MIN_WATERMARK_LOWER_LIMIT;
     else if (nr_minwatermark > MAX_WATERMARK_UPPER_LIMIT)
@@ -123,6 +124,7 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
 
     lruvec = mem_cgroup_lruvec(memcg, pgdat);
     lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	//这里的意思应该是最大迁移低层的所有active 链表
     
     if (htmm_mode == HTMM_NO_MIG)
 		return 0;
@@ -141,11 +143,11 @@ static bool need_toptier_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, un
     if (target_nid == NUMA_NO_NODE)
 		return false;
 
-    target_pgdat = NODE_DATA(target_nid);
+    target_pgdat = NODE_DATA(target_nid); //啥意思，要降级去的目标节点吗？
 
-    nr_lru_pages = get_nr_lru_pages_node(memcg, pgdat);
+    nr_lru_pages = get_nr_lru_pages_node(memcg, pgdat); //当前节点页面数量
 
-	if (nr_lru_pages < *nr_exceeded)
+	if (nr_lru_pages < *nr_exceeded) //小于要迁移的页面数量，显然不合法，要给他减小一些
 	    *nr_exceeded = nr_lru_pages - 1U * 128 * 100;
 
 	return true;
@@ -178,7 +180,7 @@ static unsigned long node_free_pages(pg_data_t *pgdat)
 
 // 这个函数用于反映DRAM层还剩下多少空间
 static bool promotion_available(int target_nid, struct mem_cgroup *memcg,
-	unsigned long long *nr_to_promote)
+	unsigned long *nr_to_promote)
 {
     pg_data_t *pgdat;
     unsigned long max_nr_pages, cur_nr_pages;
@@ -196,15 +198,18 @@ static bool promotion_available(int target_nid, struct mem_cgroup *memcg,
     
     fasttier_max_watermark = get_memcg_promotion_watermark(max_nr_pages); //watermark，是指保持最小空闲页面数
 
-    if (max_nr_pages == ULONG_MAX) {
-		*nr_to_promote = node_free_pages(pgdat);
-		return true;
-    }
-    else if (cur_nr_pages + nr_isolated < max_nr_pages - fasttier_max_watermark) {
+    // if (max_nr_pages == ULONG_MAX) {
+	// 	*nr_to_promote = node_free_pages(pgdat);
+	// 	return true;
+    // }
+    // else 
+	if (cur_nr_pages + nr_isolated < max_nr_pages - fasttier_max_watermark) {
 		*nr_to_promote = max_nr_pages - fasttier_max_watermark - cur_nr_pages - nr_isolated;
 		return true;
-    }
-    return false;
+    }else{
+		*nr_to_promote = 0;
+		return false;
+	}
 }
 
 // static bool need_lru_adjusting(struct mem_cgroup_per_node *pn)
@@ -504,7 +509,7 @@ static unsigned long demote_lruvec(unsigned long nr_to_reclaim, short priority,
 {
     enum lru_list lru, tmp;
     unsigned long nr_reclaimed = 0;
-    long nr_to_scan;
+    unsigned long nr_to_scan;
 
     /* we need to scan file lrus first */
     for_each_evictable_lru(tmp) {
@@ -570,6 +575,7 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
     }
     
     nr_to_reclaim = nr_exceeded;	
+	printk("true demoting %lu",nr_to_reclaim);
     
     if (nr_exceeded > nr_evictable_pages)
 		shrink_active = true;
@@ -588,7 +594,7 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 {
     struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
-    unsigned long long nr_to_promote, nr_promoted = 0, tmp = 0; //向上迁移是不限量的，有就迁移
+    unsigned long nr_to_promote, nr_promoted = 0, tmp = 0; //向上迁移是不限量的，有就迁移
     enum lru_list lru = LRU_ACTIVE_ANON;
     short priority = DEF_PRIORITY;
     int target_nid = htmm_cxl_mode ? 0 : next_promotion_node(pgdat->node_id);
@@ -603,7 +609,7 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 		nr_to_promote = min(tmp, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
     }
 
-	printk("___get the promoted %llu___", nr_to_promote);
+	printk("___get the promoted %lu___", nr_to_promote);
 
     do {
 		nr_promoted += promote_lruvec(nr_to_promote, priority, pgdat, lruvec, lru);
@@ -661,7 +667,7 @@ static int kmigraterd(void *p)
 	for ( ; ; ) {
 	    struct mem_cgroup_per_node *pn;
 	    struct mem_cgroup *memcg;
-		unsigned long long nr_available;
+		unsigned long nr_available;
 		long long tmp_demotion;
 		unsigned int nr_demotion;
 	    LIST_HEAD(split_list);
@@ -687,16 +693,20 @@ static int kmigraterd(void *p)
 	
 		get_best_action(&nr_action);
 		if(nr_action){ //如果有行动的话
-			promotion_available(nid, memcg, &nr_available);
-			tmp_demotion  = (unsigned long long)nr_action-nr_available;
-			printk("___get the available %llu___", nr_available);
+			if(promotion_available(nid, memcg, &nr_available)){ //true表示还有空余页面
+				tmp_demotion  = (unsigned long long)nr_action-nr_available;
+				printk("___get the available %lu___", nr_available);
+			}else{
+				tmp_demotion  = (unsigned long long)nr_action;
+			}
+			
 			if(tmp_demotion >0 && tmp_demotion <= INT_MAX){
 				nr_demotion = (int)tmp_demotion; //有可能不会降级那么多，相应能升级的就要更少，但不需要知道具体的数，因为迁移上去的页面由当时空多少决定
 				printk("___get the demotion %d___", nr_demotion);//大于0的话就需要降级，降级操作是由DRAM node做的
 				kmigraterd_demotion(pgdat, memcg, nr_demotion);
 			}
 			//升级，升级操作是由PM node做的
-			kmigraterd_promotion(NODE_DATA(nid+2), memcg);
+			kmigraterd_promotion(NODE_DATA(nid+1), memcg);
 		}
 		
 		// 然后后台线程睡眠

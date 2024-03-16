@@ -291,9 +291,9 @@ int ksamplingd_init(pid_t pid, int node)
 
 void ksamplingd_exit(void)
 {
-    if (access_sampling) {
-		kthread_stop(access_sampling);
-		access_sampling = NULL;
-    }
-    pebs_disable();
+    //if (access_sampling) {
+		//kthread_stop(access_sampling);
+		//access_sampling = NULL;
+    //}
+    //pebs_disable();
 }
