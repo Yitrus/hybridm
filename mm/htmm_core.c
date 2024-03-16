@@ -816,6 +816,6 @@ void update_stats(unsigned long long nr_bw, unsigned long long nr_cyc, unsigned 
 	//TODO:怎么得到我想要的cgroup,且重新定义cgroup的结构。不过也可以是内存共享的全局的东西
 	//先输出看看长什么样,空闲多少从迁移那边传吧？等等好像都不需要这个哩，咦~
 
-	printk(KERN_INFO "bw %llu cyc %llu ins %llu \n", nr_bw, nr_cyc, nr_ins);
+	printk(KERN_INFO "bw %llu cyc %llu ins %llu", nr_bw, nr_cyc, nr_ins);
 	
 }

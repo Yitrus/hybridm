@@ -175,7 +175,7 @@ static unsigned long node_free_pages(pg_data_t *pgdat)
 }
 
 static bool promotion_available(int target_nid, struct mem_cgroup *memcg,
-	unsigned long *nr_to_promote)
+	unsigned long long *nr_to_promote)
 {
     pg_data_t *pgdat;
     unsigned long max_nr_pages, cur_nr_pages;
@@ -603,161 +603,29 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 {
     struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
-    unsigned long nr_to_promote, nr_promoted = 0, tmp;
+    unsigned long long nr_to_promote, nr_promoted = 0, tmp = 0; //向上迁移是不限量的，有就迁移
     enum lru_list lru = LRU_ACTIVE_ANON;
     short priority = DEF_PRIORITY;
     int target_nid = htmm_cxl_mode ? 0 : next_promotion_node(pgdat->node_id);
 
     if (!promotion_available(target_nid, memcg, &nr_to_promote))
-	return 0;
+		return 0;
 
-    nr_to_promote = min(nr_to_promote,
-		    lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
+    nr_to_promote = min(nr_to_promote, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
     
     if (nr_to_promote == 0 && htmm_mode == HTMM_NO_MIG) {
-	lru = LRU_INACTIVE_ANON;
-	nr_to_promote = min(tmp, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
+		lru = LRU_INACTIVE_ANON;
+		nr_to_promote = min(tmp, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
     }
     do {
-	nr_promoted += promote_lruvec(nr_to_promote, priority, pgdat, lruvec, lru);
-	if (nr_promoted >= nr_to_promote)
-	    break;
-	priority--;
+		nr_promoted += promote_lruvec(nr_to_promote, priority, pgdat, lruvec, lru);
+		if (nr_promoted >= nr_to_promote)
+	    	break;
+		priority--;
     } while (priority);
     
     return nr_promoted;
 }
-
-// static unsigned long adjusting_lru_list(unsigned long nr_to_scan,
-// 	struct lruvec *lruvec, enum lru_list lru, unsigned int *nr_huge, unsigned int *nr_base)
-// {
-//     unsigned long nr_taken;
-//     pg_data_t *pgdat = lruvec_pgdat(lruvec);
-//     struct mem_cgroup *memcg = lruvec_memcg(lruvec);
-//     LIST_HEAD(l_hold);
-//     LIST_HEAD(l_active);
-//     LIST_HEAD(l_inactive);
-//     int file = is_file_lru(lru);
-//     bool active = is_active_lru(lru);
-
-//     unsigned int nr_split_cand = 0, nr_split_hot = 0;
-
-//     if (file)
-// 	return 0;
-
-//     lru_add_drain();
-
-//     spin_lock_irq(&lruvec->lru_lock);
-//     nr_taken = isolate_lru_pages(nr_to_scan, lruvec, lru, &l_hold, 0);
-//     __mod_node_page_state(pgdat, NR_ISOLATED_ANON, nr_taken);
-//     spin_unlock_irq(&lruvec->lru_lock);
-
-//     cond_resched();
-//     while (!list_empty(&l_hold)) {
-// 	struct page *page;
-// 	int status;
-
-// 	page = lru_to_page(&l_hold);
-// 	list_del(&page->lru);
-
-// 	if (unlikely(!page_evictable(page))) {
-// 	    putback_lru_page(page);
-// 	    continue;
-// 	}
-// #ifdef DEFERRED_SPLIT_ISOLATED
-// 	if (PageCompound(page) && check_split_huge_page(memcg, get_meta_page(page), false)) {
-
-// 	    spin_lock_irq(&lruvec->lru_lock);
-// 	    if (!deferred_split_huge_page_for_htmm(compound_head(page))) {
-// 	        if (PageActive(page))
-// 		    	list_add(&page->lru, &l_active);
-// 			else
-// 		    	list_add(&page->lru, &l_inactive);
-// 	    }
-// 	    spin_unlock_irq(&lruvec->lru_lock);
-// 	    continue;
-// 	}
-// #endif
-// 	if (PageTransHuge(compound_head(page))) {
-// 	    struct page *meta = get_meta_page(page);
-	    
-// 	    if (meta->idx >= memcg->active_threshold)
-// 		status = 2;
-// 	    else
-// 		status = 1;
-// 	    nr_split_hot++;
-// 	}
-// 	else {
-// 	    status = page_check_hotness(page, memcg);
-// 	    nr_split_cand++;
-// 	}
-	
-// 	if (status == 2) {
-// 	    if (active) {
-// 		list_add(&page->lru, &l_active);
-// 		continue;
-// 	    }
-
-// 	    SetPageActive(page);
-// 	    list_add(&page->lru, &l_active);
-// 	} else if (status == 0) {
-// 	    if (PageActive(page))
-// 		list_add(&page->lru, &l_active);
-// 	    else
-// 		list_add(&page->lru, &l_inactive);
-// 	} else {
-// 	    if (!active) {
-// 		list_add(&page->lru, &l_inactive);
-// 		continue;
-// 	    }
-
-// 	    ClearPageActive(page);
-// 	    SetPageWorkingset(page);
-// 	    list_add(&page->lru, &l_inactive);
-
-// 	}
-//     }
-
-//     spin_lock_irq(&lruvec->lru_lock);
-//     move_pages_to_lru(lruvec, &l_active);
-//     move_pages_to_lru(lruvec, &l_inactive);
-//     list_splice(&l_inactive, &l_active);
-
-//     __mod_node_page_state(pgdat, NR_ISOLATED_ANON, -nr_taken);
-//     spin_unlock_irq(&lruvec->lru_lock);
-
-//     mem_cgroup_uncharge_list(&l_active);
-//     free_unref_page_list(&l_active);
-
-//     *nr_huge += nr_split_hot;
-//     *nr_base += nr_split_cand;
-
-//     return nr_taken;
-// }
-
-// static void adjusting_node(pg_data_t *pgdat, struct mem_cgroup *memcg, bool active)
-// {
-//     struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
-//     struct mem_cgroup_per_node *pn = memcg->nodeinfo[pgdat->node_id];
-//     enum lru_list lru = active ? LRU_ACTIVE_ANON : LRU_INACTIVE_ANON;
-//     unsigned long nr_to_scan, nr_scanned = 0, nr_max_scan =12;
-//     unsigned int nr_huge = 0, nr_base = 0;
-
-//     nr_to_scan = lruvec_lru_size(lruvec, lru, MAX_NR_ZONES);
-//     do {
-// 	unsigned long scan = nr_to_scan >> 3;
-
-// 	if (!scan)
-// 	    scan = nr_to_scan;
-// 	nr_scanned += adjusting_lru_list(scan, lruvec, lru, &nr_huge, &nr_base);
-// 	nr_max_scan--;
-//     } while (nr_scanned < nr_to_scan && nr_max_scan);
-    
-//     if (nr_scanned >= nr_to_scan)
-// 	WRITE_ONCE(pn->need_adjusting, false);
-//     if (nr_scanned >= nr_to_scan && !active)
-// 	WRITE_ONCE(pn->need_adjusting_all, false);
-// }
 
 static struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat)
 {
@@ -805,8 +673,9 @@ static int kmigraterd(void *p)
 	for ( ; ; ) {
 	    struct mem_cgroup_per_node *pn;
 	    struct mem_cgroup *memcg;
-		unsigned long nr_available;
-		unsigned long nr_demotion;
+		unsigned long long nr_available;
+		long long tmp_demotion;
+		unsigned int nr_demotion;
 	    LIST_HEAD(split_list);
 
 	    if (kthread_should_stop()){ // 还不清楚这是干啥，先保留下来
@@ -829,11 +698,13 @@ static int kmigraterd(void *p)
 	    }
 	
 		get_best_action(&nr_action);
+		printk("get the actoin %d", nr_action);
 		if(!nr_action){ //如果有行动的话
 			promotion_available(nid, memcg, &nr_available);
-			nr_demotion = nr_action-nr_available;
-			if(nr_demotion){ //大于0的话就需要降级，降级操作是由DRAM node做的
-				//有可能不会降级那么多，相应能升级的就要更少，但不需要知道具体的数，因为迁移上去的页面由当时空多少决定
+			tmp_demotion  = (unsigned long long)nr_action-nr_available;
+			if(tmp_demotion >0 && tmp_demotion <= INT_MAX){
+				nr_demotion = (int)tmp_demotion; //有可能不会降级那么多，相应能升级的就要更少，但不需要知道具体的数，因为迁移上去的页面由当时空多少决定
+				printk("get the demotion %d", nr_demotion);//大于0的话就需要降级，降级操作是由DRAM node做的
 				kmigraterd_demotion(pgdat, memcg, nr_demotion);
 			}
 			//升级，升级操作是由PM node做的

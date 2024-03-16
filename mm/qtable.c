@@ -4,7 +4,7 @@
 #define NUM_STATES 10
 #define NUM_ACTIONS 10
 
-unsigned int suj_action=10; //nr_action是全局变量，每次更新完状态，通过这个桥梁更新action
+unsigned int suj_action=500; //nr_action是全局变量，每次更新完状态，通过这个桥梁更新action
 
 // 显式初始化Q-Table
 unsigned int Q[NUM_STATES][NUM_ACTIONS] = {

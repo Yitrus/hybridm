@@ -70,7 +70,6 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
 		__pid = pid;
 	
     event_fd = htmm__perf_event_open(&attr, __pid, cpu, -1, 0);
-    //event_fd = htmm__perf_event_open(&attr, -1, cpu, -1, 0);
     if (event_fd <= 0) {
 		printk("[error htmm__perf_event_open failure] event_fd: %d\n", event_fd);
 		return -1;
@@ -94,7 +93,6 @@ static int pebs_init(pid_t pid, int node)
 		mem_event[cpu] = kzalloc(sizeof(struct perf_event *) * N_HTMMEVENTS, GFP_KERNEL);
     }
     
-    // printk("pebs_init\n");   
     for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 	for (event = 0; event < N_HTMMEVENTS; event++) { 
 	/*要先确定有多少个cpu核心，还要确定哪些事件是根据cpu核心来确定的
@@ -120,7 +118,7 @@ static void pebs_disable(void)
 {
     int cpu, event;
 
-    // printk("pebs disable\n");
+
     for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 	for (event = 0; event < N_HTMMEVENTS; event++) {
 	    if (mem_event[cpu][event])
@@ -128,19 +126,6 @@ static void pebs_disable(void)
 	}
     }
 }
-
-// static void pebs_enable(void)
-// {
-//     int cpu, event;
-
-//     // printk("pebs enable\n");
-//     for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
-// 	for (event = 0; event < N_HTMMEVENTS; event++) {
-// 	    if (mem_event[cpu][event])
-// 			perf_event_enable(mem_event[cpu][event]);
-// 	}
-//     }
-// }
 
 unsigned long long nr_bw = 0, nr_cyc = 0, nr_ins = 0;
 static int ksamplingd(void *data)
