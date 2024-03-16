@@ -273,19 +273,20 @@ static int ksamplingd_run(void)
 }
 
 int ksamplingd_init(pid_t pid, int node)
-{
-    int ret;
+{ //希望在调试迁移线程时不受采样线程影响
+    // int ret;
 
-    if (access_sampling)
+    // if (access_sampling)
 		return 0;
 
-    ret = pebs_init(pid, node);
-    if (ret) {
-		printk("htmm__perf_event_init failure... ERROR:%d\n", ret);
-		return 0;
-    }
+    // ret = pebs_init(pid, node); //采样线程从这里就在报错了
+    // if (ret) {
+		// printk("htmm__perf_event_init failure... ERROR:%d\n", ret);
+		// return 0;
+    // }
 
-    return ksamplingd_run();
+    // return ksamplingd_run();
+	return 0;
 }
 
 void ksamplingd_exit(void)

@@ -684,7 +684,7 @@ static int kmigraterd(void *p)
 	    }
 	
 		get_best_action(&nr_action);
-		if(!nr_action){ //如果有行动的话
+		if(nr_action){ //如果有行动的话
 			promotion_available(nid, memcg, &nr_available);
 			tmp_demotion  = (unsigned long long)nr_action-nr_available;
 			printk("___get the available %llu___", nr_available);
