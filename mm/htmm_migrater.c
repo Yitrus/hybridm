@@ -126,8 +126,11 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
     lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
 	//这里的意思应该是最大迁移低层的所有active 链表
     
-    if (htmm_mode == HTMM_NO_MIG)
-		return 0;
+    if (htmm_mode == HTMM_NO_MIG){
+		//降级的时候咋没判断这个
+		printk("htmm_mode == %d", htmm_mode);
+		//return 0;
+	}
 
     return lruvec_size;
 }
@@ -151,7 +154,6 @@ static bool need_toptier_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, un
 	    *nr_exceeded = nr_lru_pages - 1U * 128 * 100;
 
 	return true;
-
 }
 
 static unsigned long node_free_pages(pg_data_t *pgdat)
@@ -594,20 +596,24 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 {
     struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
-    unsigned long nr_to_promote, nr_promoted = 0, tmp = 0; //向上迁移是不限量的，有就迁移
+    unsigned long nr_to_promote, nr_promoted = 0; //向上迁移是不限量的，有就迁移,但是现在逻辑还是尽量迁移action的量
     enum lru_list lru = LRU_ACTIVE_ANON;
     short priority = DEF_PRIORITY;
     int target_nid = htmm_cxl_mode ? 0 : next_promotion_node(pgdat->node_id);
 
-    if (!promotion_available(target_nid, memcg, &nr_to_promote))
+	printk("next_promotion_node = %d", target_nid);
+    if (!promotion_available(target_nid, memcg, &nr_to_promote)){
+		// 如果表示向上迁移的容量是0
+		printk("promotion_available==0 no promotion");
 		return 0;
-
-    nr_to_promote = min(nr_to_promote, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
+	}
+		
+    nr_to_promote = min((unsigned long)nr_action, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
     
-    if (nr_to_promote == 0 && htmm_mode == HTMM_NO_MIG) {
-		lru = LRU_INACTIVE_ANON;
-		nr_to_promote = min(tmp, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
-    }
+    // if (nr_to_promote == 0 && htmm_mode == HTMM_NO_MIG) {
+	// 	lru = LRU_INACTIVE_ANON;
+	// 	nr_to_promote = min(tmp, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
+    // }
 
 	printk("___-get the promoted %lu-___", nr_to_promote);
 
@@ -731,7 +737,7 @@ static void kmigraterd_run(int nid)
 
     pgdat->kmigraterd = kthread_run(kmigraterd, pgdat, "kmigraterd%d", nid);
     if (IS_ERR(pgdat->kmigraterd)) {
-	pr_err("Fails to start kmigraterd on node %d\n", nid);
+		pr_err("Fails to start kmigraterd on node %d\n", nid);
 	pgdat->kmigraterd = NULL;
     }
 }
