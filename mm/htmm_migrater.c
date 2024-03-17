@@ -122,6 +122,9 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
     unsigned long lruvec_size;
 
     lruvec = mem_cgroup_lruvec(memcg, pgdat);
+	if(lruvec == NULL){
+		printk("lruvec is null");
+	}
     lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
 	//这里的意思应该是最大迁移低层的所有active 链表
     
@@ -661,6 +664,7 @@ static int kmigraterd_promotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
 		printk("will do promote_node");
 	    promote_node(pgdat, memcg);
 	}
+	//promote_node(pgdat, memcg);
 
     return 0;
 }
@@ -677,6 +681,7 @@ static int kmigraterd(void *p)
 	    struct mem_cgroup *memcg;
 		unsigned long nr_available;
 		unsigned int nr_demotion;
+		pg_data_t *pgdat2;
 	    LIST_HEAD(split_list);
 
 	    if (kthread_should_stop()){ // 还不清楚这是干啥，先保留下来
@@ -701,7 +706,7 @@ static int kmigraterd(void *p)
 		get_best_action(&nr_action);
 		if(nr_action){ //如果有行动的话
 			if(promotion_available(nid, memcg, &nr_available)){ //true表示还有空余页面
-				printk("___get the available %lu___", nr_available);
+				//printk("___get the available %lu___", nr_available);
 				//刚开始初始化时还有很多空余，不需要迁移，
 				//从DRAM开始分配，以及每次迁移都是将DRAM占满，
 				//所以每次打算执行向上迁移之前，，DRAM一定是满的。
@@ -710,10 +715,14 @@ static int kmigraterd(void *p)
 					nr_demotion = nr_action; //有可能不会降级那么多，相应能升级的就要更少，但不需要知道具体的数，因为迁移上去的页面由当时空多少决定
 					//大于0的话就需要降级，降级操作是由DRAM node做的
 					kmigraterd_demotion(pgdat, memcg, nr_demotion);
-					printk("demotion not exit?");
+					//printk("demotion not exit?");
 					//升级，升级操作是由PM node做的
-					kmigraterd_promotion(NODE_DATA(nid+1), memcg);
-					printk("finish promotion?");
+					pgdat2 = NODE_DATA(1);
+					if(pgdat2 == NULL){
+						printk("NO PGDAT FOR NODE 1");
+					}
+					kmigraterd_promotion(pgdat2, memcg);
+					//printk("finish promotion?");
 				}
 			}
 		}

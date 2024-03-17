@@ -784,6 +784,7 @@ static inline struct lruvec *mem_cgroup_lruvec(struct mem_cgroup *memcg,
 
 	if (mem_cgroup_disabled()) {
 		lruvec = &pgdat->__lruvec;
+		printk("the lru what i hope");
 		goto out;
 	}
 
@@ -792,6 +793,7 @@ static inline struct lruvec *mem_cgroup_lruvec(struct mem_cgroup *memcg,
 
 	mz = memcg->nodeinfo[pgdat->node_id];
 	lruvec = &mz->lruvec;
+	printk("memcg lru what maybe 0");
 out:
 	/*
 	 * Since a node can be onlined after the mem_cgroup was created,
