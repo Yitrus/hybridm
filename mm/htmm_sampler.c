@@ -277,12 +277,12 @@ int ksamplingd_init(pid_t pid, int node)
     // int ret;
 
     // if (access_sampling)
-		return 0;
+	// 	return 0;
 
-    // ret = pebs_init(pid, node); //采样线程从这里就在报错了
+    // ret = pebs_init(pid, node); //采样线程从这里就在报错了，应该就是core按照server定义的，多了
     // if (ret) {
-		// printk("htmm__perf_event_init failure... ERROR:%d\n", ret);
-		// return 0;
+	// 	printk("htmm__perf_event_init failure... ERROR:%d", ret);
+	// 	return 0;
     // }
 
     // return ksamplingd_run();
@@ -291,9 +291,9 @@ int ksamplingd_init(pid_t pid, int node)
 
 void ksamplingd_exit(void)
 {
-    //if (access_sampling) {
-		//kthread_stop(access_sampling);
-		//access_sampling = NULL;
-    //}
-    //pebs_disable();
+    // if (access_sampling) {
+	// 	kthread_stop(access_sampling);
+	// 	access_sampling = NULL;
+    // }
+    // pebs_disable();
 }

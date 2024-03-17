@@ -668,7 +668,6 @@ static int kmigraterd(void *p)
 	    struct mem_cgroup_per_node *pn;
 	    struct mem_cgroup *memcg;
 		unsigned long nr_available;
-		long long tmp_demotion;
 		unsigned int nr_demotion;
 	    LIST_HEAD(split_list);
 
@@ -694,19 +693,19 @@ static int kmigraterd(void *p)
 		get_best_action(&nr_action);
 		if(nr_action){ //如果有行动的话
 			if(promotion_available(nid, memcg, &nr_available)){ //true表示还有空余页面
-				tmp_demotion  = (unsigned long long)nr_action-nr_available;
 				printk("___get the available %lu___", nr_available);
-			}else{
-				tmp_demotion  = (unsigned long long)nr_action;
+				//刚开始初始化时还有很多空余，不需要迁移，
+				//从DRAM开始分配，以及每次迁移都是将DRAM占满，
+				//所以每次打算执行向上迁移之前，，DRAM一定是满的。
+			}else{ //DRAM层没有空余页面
+				if(nr_action >0 && nr_action <= INT_MAX){
+					nr_demotion = nr_action; //有可能不会降级那么多，相应能升级的就要更少，但不需要知道具体的数，因为迁移上去的页面由当时空多少决定
+					//大于0的话就需要降级，降级操作是由DRAM node做的
+					kmigraterd_demotion(pgdat, memcg, nr_demotion);
+				}
+				//升级，升级操作是由PM node做的
+				kmigraterd_promotion(NODE_DATA(nid+1), memcg);
 			}
-			
-			if(tmp_demotion >0 && tmp_demotion <= INT_MAX){
-				nr_demotion = (int)tmp_demotion; //有可能不会降级那么多，相应能升级的就要更少，但不需要知道具体的数，因为迁移上去的页面由当时空多少决定
-				printk("___get the demotion %d___", nr_demotion);//大于0的话就需要降级，降级操作是由DRAM node做的
-				kmigraterd_demotion(pgdat, memcg, nr_demotion);
-			}
-			//升级，升级操作是由PM node做的
-			kmigraterd_promotion(NODE_DATA(nid+1), memcg);
 		}
 		
 		// 然后后台线程睡眠
