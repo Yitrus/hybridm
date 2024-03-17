@@ -609,7 +609,7 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 		nr_to_promote = min(tmp, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
     }
 
-	printk("___get the promoted %lu___", nr_to_promote);
+	printk("___-get the promoted %lu-___", nr_to_promote);
 
     do {
 		nr_promoted += promote_lruvec(nr_to_promote, priority, pgdat, lruvec, lru);
@@ -737,25 +737,26 @@ static void kmigraterd_run(int nid)
     }
 }
 
+// 这里启动和结束只考虑1个节点
 void kmigraterd_stop(void)
 {
-    int nid;
+    int nid = 0;
 
-    for_each_node_state(nid, N_MEMORY) {
-	struct task_struct *km = NODE_DATA(nid)->kmigraterd;
+    //for_each_node_state(nid, N_MEMORY) {
+		struct task_struct *km = NODE_DATA(nid)->kmigraterd;
 
-	if (km) {
-	    kthread_stop(km);
-	    NODE_DATA(nid)->kmigraterd = NULL;
-	}
-    }
+		if (km) {
+	    	kthread_stop(km);
+	    	NODE_DATA(nid)->kmigraterd = NULL;
+		}
+    //}
 }
 
 int kmigraterd_init(void)
 {
-    int nid;
+    int nid = 0;
 
-    for_each_node_state(nid, N_MEMORY)
+    //for_each_node_state(nid, N_MEMORY)
 	kmigraterd_run(nid);
     return 0;
 }
