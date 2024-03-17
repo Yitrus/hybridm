@@ -35,7 +35,7 @@ static __u64 get_pebs_event(enum events e)
 
 static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
 	__u64 type, __u32 pid)
-{ //再看看采样模板，不希望记录上下文数据
+{ 
     struct perf_event_attr attr; // 函数需要的结构体，告诉这个文件描述符该怎么创建，因为采样不同的事件最后传回的perf_event结构体也不一样。
     struct file *file; // 已打开的文件在内核中用file结构体表示，文件描述符表中的指针指向file结构体。
     int event_fd, __pid; // 我要接收的文件句柄
@@ -104,10 +104,14 @@ static int pebs_init(pid_t pid, int node)
 			continue;
 	    }
 
-	    if (__perf_event_open(get_pebs_event(event), 0, cpu, event, pid))
+	    if (__perf_event_open(get_pebs_event(event), 0, cpu, event, pid)){
+			printk("pebs_init __perf_event_open failed %d event", event);
 			return -1;
-	    if (htmm__perf_event_init(mem_event[cpu][event], BUFFER_SIZE))
+		}
+	    if (htmm__perf_event_init(mem_event[cpu][event], BUFFER_SIZE)){
+			printk("pebs_init htmm__perf_event_init failed %d event cpu %d", event, cpu);
 			return -1;
+		}
 	}
     }
 
@@ -168,7 +172,7 @@ static int ksamplingd(void *data)
 
 					rb = mem_event[cpu][event]->rb;
 					if (!rb) {
-						printk("event->rb is NULL\n");
+						printk("event->rb is NULL ");
 						return -1;
 					}
 					/* perf_buffer is ring buffer */

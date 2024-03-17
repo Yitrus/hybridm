@@ -12591,8 +12591,11 @@ int htmm__perf_event_open(struct perf_event_attr *attr_ptr, pid_t pid,
 
 	/* Do we allow access to perf_event_open(2) ? */
 	err = security_perf_event_open(&attr, PERF_SECURITY_OPEN);
-	if (err)
+	if (err){
+		printk("[htmm__perf_event_open] not allowed access to perf_event_open(2)");
 		return err;
+	}
+		
 
 	/*err = perf_copy_attr(attr_ptr, &attr);
 	if (err)
@@ -12601,8 +12604,10 @@ int htmm__perf_event_open(struct perf_event_attr *attr_ptr, pid_t pid,
 
 	if (!attr.exclude_kernel) {
 		err = perf_allow_kernel(&attr);
-		if (err)
+		if (err){
+			printk("[htmm__perf_event_open] not allowed attr");
 			return err;
+		}	
 	}
 
 	if (attr.namespaces) {

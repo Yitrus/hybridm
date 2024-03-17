@@ -577,7 +577,6 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
     }
     
     nr_to_reclaim = nr_exceeded;	
-	printk("true demoting %lu",nr_to_reclaim);
     
     if (nr_exceeded > nr_evictable_pages)
 		shrink_active = true;
@@ -589,6 +588,8 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 			break;
 		priority--;
     } while (priority);
+
+	printk("true demoting %lu",nr_to_reclaim);
 
     return nr_reclaimed;
 }
@@ -708,9 +709,10 @@ static int kmigraterd(void *p)
 					nr_demotion = nr_action; //有可能不会降级那么多，相应能升级的就要更少，但不需要知道具体的数，因为迁移上去的页面由当时空多少决定
 					//大于0的话就需要降级，降级操作是由DRAM node做的
 					kmigraterd_demotion(pgdat, memcg, nr_demotion);
+					printk("demotion not exit?");
+					//升级，升级操作是由PM node做的
+					kmigraterd_promotion(NODE_DATA(nid+1), memcg);
 				}
-				//升级，升级操作是由PM node做的
-				kmigraterd_promotion(NODE_DATA(nid+1), memcg);
 			}
 		}
 		
