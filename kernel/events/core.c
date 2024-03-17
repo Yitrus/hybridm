@@ -12626,15 +12626,20 @@ int htmm__perf_event_open(struct perf_event_attr *attr_ptr, pid_t pid,
 	/* Only privileged users can get physical addresses */
 	if ((attr.sample_type & PERF_SAMPLE_PHYS_ADDR)) {
 		err = perf_allow_kernel(&attr);
-		if (err)
+		if (err){
+			printk("[htmm__perf_event_open] not allowed attr.sample_type 1");
 			return err;
+		}
+			
 	}
 
 	/* REGS_INTR can leak data, lockdown must prevent this */
 	if (attr.sample_type & PERF_SAMPLE_REGS_INTR) {
 		err = security_locked_down(LOCKDOWN_PERF);
-		if (err)
+		if (err){
+			printk("[htmm__perf_event_open] not allowed attr.sample_type 2");
 			return err;
+		}
 	}
 
 	/*

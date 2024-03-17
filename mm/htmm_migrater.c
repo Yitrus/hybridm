@@ -117,8 +117,7 @@ unsigned long get_nr_lru_pages_node(struct mem_cgroup *memcg, pg_data_t *pgdat)
 }
 
 static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
-{// edit by 100, 因为之前已经确定了能迁移多少页面到上级，原本的逻辑是上层剩多少迁移多少
-// 现在虽然我们执行action是希望迁移的，不过按理说应该也是充分利用，DRAM别空着啊。
+{
     struct lruvec *lruvec;
     unsigned long lruvec_size;
 
@@ -131,6 +130,8 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
 		printk("htmm_mode == %d", htmm_mode);
 		//return 0;
 	}
+
+	printk("lruvec_size %lu", lruvec_size);
 
     return lruvec_size;
 }
@@ -589,7 +590,7 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 		priority--;
     } while (priority);
 
-	printk("true demoting %lu",nr_to_reclaim);
+	printk("true demoting %lu",nr_reclaimed);
 
     return nr_reclaimed;
 }
@@ -656,8 +657,8 @@ static int kmigraterd_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, unsig
 static int kmigraterd_promotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
 {
    // edit by 100, 这里做页面 升级 升级 升级 操作，promotes hot pages to fast memory node
- 
 	if (need_lowertier_promotion(pgdat, memcg)) {
+		printk("will do promote_node");
 	    promote_node(pgdat, memcg);
 	}
 
@@ -712,6 +713,7 @@ static int kmigraterd(void *p)
 					printk("demotion not exit?");
 					//升级，升级操作是由PM node做的
 					kmigraterd_promotion(NODE_DATA(nid+1), memcg);
+					printk("finish promotion?");
 				}
 			}
 		}
