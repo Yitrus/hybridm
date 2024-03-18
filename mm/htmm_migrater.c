@@ -121,13 +121,9 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
     struct lruvec *lruvec;
     unsigned long lruvec_size;
 
-	lruvec = &pgdat->__lruvec;
-	if (unlikely(lruvec->pgdat != pgdat))
-		lruvec->pgdat = pgdat;
-    //lruvec = mem_cgroup_lruvec(NULL, pgdat); 
+	lruvec = mem_cgroup_lruvec(NULL, pgdat); 
 	/*这个函数返回不正确的原因
-	应该是传入的memcg并不是mem_cgroup_disabled的，
-	将cgroup变成null指针，希望拿到下层numa node的lru
+	应该是传入的memcg，
 	*/
 	if(lruvec == NULL){
 		printk("lruvec is null");
@@ -645,11 +641,11 @@ static struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat)
 
     spin_lock(&pgdat->kmigraterd_lock);
     if (!list_empty(&pgdat->kmigraterd_head)) {
-	pn = list_first_entry(&pgdat->kmigraterd_head, typeof(*pn), kmigraterd_list);
-	list_move_tail(&pn->kmigraterd_list, &pgdat->kmigraterd_head);
+		pn = list_first_entry(&pgdat->kmigraterd_head, typeof(*pn), kmigraterd_list);
+		list_move_tail(&pn->kmigraterd_list, &pgdat->kmigraterd_head);
     }
     else
-	pn = NULL;
+		pn = NULL;
     spin_unlock(&pgdat->kmigraterd_lock);
 
     return pn;
@@ -680,6 +676,7 @@ static int kmigraterd(void *p)
 {
     pg_data_t *pgdat = (pg_data_t *)p;
     int nid = pgdat->node_id;
+	pg_data_t *pgdat2 = NODE_DATA(1);
 
 // edit by 100,假设已经获得需要操作的数量，现在判断上下应该被迁移的数目
 // 这些操作是根据cgroup来做的, 遍历node 0的
@@ -687,20 +684,23 @@ static int kmigraterd(void *p)
 	    struct mem_cgroup_per_node *pn;
 	    struct mem_cgroup *memcg;
 		unsigned long nr_available;
-		unsigned int nr_demotion;
-		pg_data_t *pgdat2;
+		long nr_demotion;
 	    LIST_HEAD(split_list);
+
+		struct mem_cgroup_per_node *pn2;
+		struct mem_cgroup *memcg2;
 
 	    if (kthread_should_stop()){ // 还不清楚这是干啥，先保留下来
 	        break;
 		}
-		pn = next_memcg_cand(pgdat); // 虽然目前不太清楚这个内存控制组是怎么得到的
-	    //但是由于内存控制组是全局的，从DRAM节点也能遍历得到也属于PM节点的cgroup
+
+		pn = next_memcg_cand(pgdat); 
 		if (!pn) { // 如果没有内存控制组就睡眠2s
-	        msleep_interruptible(2000);
-	        continue;
+	        	msleep_interruptible(2000);
+	        	continue;
 	    }
 
+		// ---------------------对于降级的操作---------------------------------
 	    memcg = pn->memcg;
 	    if (!memcg || !memcg->htmm_enabled) {
 	        spin_lock(&pgdat->kmigraterd_lock);
@@ -711,27 +711,30 @@ static int kmigraterd(void *p)
 	    }
 	
 		get_best_action(&nr_action);
-		if(nr_action){ //如果有行动的话
-			if(promotion_available(nid, memcg, &nr_available)){ //true表示还有空余页面
-				//printk("___get the available %lu___", nr_available);
-				//刚开始初始化时还有很多空余，不需要迁移，
-				//从DRAM开始分配，以及每次迁移都是将DRAM占满，
-				//所以每次打算执行向上迁移之前，，DRAM一定是满的。
-			}else{ //DRAM层没有空余页面
-				if(nr_action >0 && nr_action <= INT_MAX){
-					nr_demotion = nr_action; //有可能不会降级那么多，相应能升级的就要更少，但不需要知道具体的数，因为迁移上去的页面由当时空多少决定
-					//大于0的话就需要降级，降级操作是由DRAM node做的
-					kmigraterd_demotion(pgdat, memcg, nr_demotion);
-					//printk("demotion not exit?");
-					//升级，升级操作是由PM node做的
-					pgdat2 = NODE_DATA(1);
-					if(pgdat2 == NULL){
-						printk("NO PGDAT FOR NODE 1");
-					}
-					kmigraterd_promotion(pgdat2, memcg);
-					//printk("finish promotion?");
-				}
+		if(nr_action >0 && nr_action <= INT_MAX){ //如果有行动的话
+			promotion_available(nid, memcg, &nr_available);
+			nr_demotion = (unsigned long)nr_action - nr_available; //可能存在最初空闲太多的情况
+			if(nr_demotion > 0){ //true表示还有空余页面
+				printk("nr demotion %ld", nr_demotion);
+				kmigraterd_demotion(pgdat, memcg, nr_demotion);
 			}
+		}
+
+		// ---------------------对于升级的操作---------------------------------
+		pn2 = next_memcg_cand(pgdat2); 
+		if(pn2){
+			printk("pn2 max nr of page %lu",pn2->max_nr_base_pages);
+		}else{
+			pn2 = next_memcg_cand(pgdat2); 
+			printk("no pn for node 1");
+		}
+
+		memcg2 = pn2->memcg;
+		if(nr_action >0 && nr_action <= INT_MAX){
+			if(pgdat2 == NULL){
+				printk("NO PGDAT FOR NODE 1");
+			}
+			kmigraterd_promotion(pgdat2, memcg2);
 		}
 		
 		// 然后后台线程睡眠
@@ -750,15 +753,31 @@ void kmigraterd_wakeup(int nid)
 static void kmigraterd_run(int nid)
 {
     pg_data_t *pgdat = NODE_DATA(nid);
-    if (!pgdat || pgdat->kmigraterd)
-	return;
+	pg_data_t *pgdat2 = NODE_DATA(1);
+    if (!pgdat || pgdat->kmigraterd){
+		printk("node 0 struct null");
+		return;
+	}
 
+	if (!pgdat2 || pgdat2->kmigraterd){
+		printk("node 1 struct null");
+		return;
+	}
+		
     init_waitqueue_head(&pgdat->kmigraterd_wait);
+	//init_waitqueue_head(&pgdat2->kmigraterd_wait);一个节点去做就好了
 
     pgdat->kmigraterd = kthread_run(kmigraterd, pgdat, "kmigraterd%d", nid);
+	pgdat2->kmigraterd = pgdat->kmigraterd;
+	// 第二个参数指向thread function的参数，所以没影响
     if (IS_ERR(pgdat->kmigraterd)) {
-		pr_err("Fails to start kmigraterd on node %d\n", nid);
-	pgdat->kmigraterd = NULL;
+		pr_err("Fails to start kmigraterd on node %d", nid);
+		pgdat->kmigraterd = NULL;
+    }
+
+	if (IS_ERR(pgdat2->kmigraterd)) {
+		pr_err("Fails to start kmigraterd on node 1");
+		pgdat2->kmigraterd = NULL;
     }
 }
 
@@ -773,6 +792,7 @@ void kmigraterd_stop(void)
 		if (km) {
 	    	kthread_stop(km);
 	    	NODE_DATA(nid)->kmigraterd = NULL;
+			NODE_DATA(1)->kmigraterd = NULL;
 		}
     //}
 }
