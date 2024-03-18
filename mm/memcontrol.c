@@ -7769,8 +7769,8 @@ static int pgdat_memcg_htmm_init(struct pglist_data *pgdat)
 {
     pgdat->memcg_htmm_file = kzalloc(sizeof(struct cftype) * 2, GFP_KERNEL);
     if (!pgdat->memcg_htmm_file) {
-	printk("error: fails to allocate pgdat->memcg_htmm_file\n");
-	return -ENOMEM;
+		printk("error: fails to allocate pgdat->memcg_htmm_file");
+		return -ENOMEM;
     }
 #ifdef CONFIG_LOCKDEP
     lockdep_register_key(&(pgdat->memcg_htmm_file->lockdep_key));

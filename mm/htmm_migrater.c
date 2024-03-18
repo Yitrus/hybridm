@@ -119,7 +119,9 @@ unsigned long get_nr_lru_pages_node(struct mem_cgroup *memcg, pg_data_t *pgdat)
 static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
 {
     struct lruvec *lruvec;
-    unsigned long lruvec_size;
+    unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
+	unsigned long node_size, node_inactive_size, node_file_active, node_file_inactive;
+	unsigned long nr_isolated;
 
 	lruvec = mem_cgroup_lruvec(memcg, pgdat); 
 	/*这个函数返回不正确的原因
@@ -129,7 +131,16 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
 		printk("lruvec is null");
 	}
     lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	//这里的意思应该是最大迁移低层的所有active 链表
+	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	
+	nr_isolated = node_page_state(pgdat, NR_ISOLATED_ANON) + node_page_state(pgdat, NR_ISOLATED_FILE);
+
+	node_size = node_page_state(pgdat, NR_ACTIVE_ANON);
+	node_inactive_size = node_page_state(pgdat, NR_INACTIVE_ANON);
+	node_file_inactive = node_page_state(pgdat, NR_INACTIVE_FILE);
+	node_file_active = node_page_state(pgdat, NR_ACTIVE_FILE);
     
     if (htmm_mode == HTMM_NO_MIG){
 		//降级的时候咋没判断这个
@@ -137,7 +148,9 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
 		//return 0;
 	}
 
-	printk("lruvec_size %lu", lruvec_size);
+	printk("the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld \n", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+	printk("the node mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld \n", node_size, node_inactive_size, node_file_active, node_file_inactive);
+	printk("the node mesg nr_isolated %lu ", nr_isolated);
 
     return lruvec_size;
 }
@@ -651,6 +664,24 @@ static struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat)
     return pn;
 }
 
+void next_memcg_cand2(pg_data_t *pgdat)
+{
+    struct mem_cgroup_per_node *pn;
+	struct list_head *tmp;
+
+    spin_lock(&pgdat->kmigraterd_lock);
+    if (!list_empty(&pgdat->kmigraterd_head)) {
+		list_for_each(tmp, &pgdat->kmigraterd_head){
+			pn = list_entry(tmp, typeof(*pn), kmigraterd_list);
+			printk("node 1 memcgroup %lu", pn->max_nr_base_pages);
+		}
+		//list_move_tail(&pn->kmigraterd_list, &pgdat->kmigraterd_head);
+    }
+    spin_unlock(&pgdat->kmigraterd_lock);
+
+    return;
+}
+
 static int kmigraterd_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, unsigned long nr_demotion)
 {
 	// edit by 100, 这里做页面 降级 降级 降级 操作
@@ -723,7 +754,9 @@ static int kmigraterd(void *p)
 		// ---------------------对于升级的操作---------------------------------
 		pn2 = next_memcg_cand(pgdat2); 
 		if(pn2){
-			printk("pn2 max nr of page %lu",pn2->max_nr_base_pages);
+			next_memcg_cand2(pgdat2);
+			// 这个看起来像没有被初始化的
+			//printk("pn2 max nr of page %lu",pn2->max_nr_base_pages);
 		}else{
 			pn2 = next_memcg_cand(pgdat2); 
 			printk("no pn for node 1");
