@@ -121,7 +121,11 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
     struct lruvec *lruvec;
     unsigned long lruvec_size;
 
-    lruvec = mem_cgroup_lruvec(memcg, pgdat);
+    lruvec = mem_cgroup_lruvec(NULL, pgdat); 
+	/*这个函数返回不正确的原因
+	应该是传入的memcg并不是mem_cgroup_disabled的，
+	将cgroup变成null指针，希望拿到下层numa node的lru
+	*/
 	if(lruvec == NULL){
 		printk("lruvec is null");
 	}
