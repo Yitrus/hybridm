@@ -7597,20 +7597,20 @@ static ssize_t memcg_htmm_write(struct kernfs_open_file *of,
 	return -EINVAL;
 
     if (memcg->htmm_enabled) {
-	kmigraterd_init();
+		kmigraterd_init();
     } else {
-	kmigraterd_stop();
+		kmigraterd_stop();
     }
     for_each_node_state(nid, N_MEMORY) {
-	struct pglist_data *pgdat = NODE_DATA(nid);
+		struct pglist_data *pgdat = NODE_DATA(nid);
 	
-	if (memcg->htmm_enabled) {
-	    WRITE_ONCE(pgdat->kswapd_failures, MAX_RECLAIM_RETRIES);
-	    add_memcg_to_kmigraterd(memcg, nid);
-	} else {
-	    WRITE_ONCE(pgdat->kswapd_failures, 0);
-	    del_memcg_from_kmigraterd(memcg, nid);
-	}
+		if (memcg->htmm_enabled) {
+	    	WRITE_ONCE(pgdat->kswapd_failures, MAX_RECLAIM_RETRIES);
+	    	add_memcg_to_kmigraterd(memcg, nid);
+		} else {
+	    	WRITE_ONCE(pgdat->kswapd_failures, 0);
+	    	del_memcg_from_kmigraterd(memcg, nid);
+		}
     }
 
     return nbytes;

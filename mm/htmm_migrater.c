@@ -44,15 +44,15 @@ void add_memcg_to_kmigraterd(struct mem_cgroup *memcg, int nid)
     pg_data_t *pgdat = NODE_DATA(nid);
 
     if (!pgdat)
-	return;
+		return;
     
     if (pn->memcg != memcg)
-	printk("memcg mismatch!\n");
+		printk("!!!!!!!!!!!memcg mismatch!!!!!!!!!!!");
 
     spin_lock(&pgdat->kmigraterd_lock);
     list_for_each_entry(mz, &pgdat->kmigraterd_head, kmigraterd_list) {
-	if (mz == pn)
-	    goto add_unlock;
+		if (mz == pn)
+	    	goto add_unlock;
     }
     list_add_tail(&pn->kmigraterd_list, &pgdat->kmigraterd_head);
 add_unlock:
@@ -119,28 +119,27 @@ unsigned long get_nr_lru_pages_node(struct mem_cgroup *memcg, pg_data_t *pgdat)
 static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
 {
     struct lruvec *lruvec;
-    unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
-	unsigned long node_size, node_inactive_size, node_file_active, node_file_inactive;
-	unsigned long nr_isolated;
+    unsigned long lruvec_size;
+	// unsigned long  lruvec_inactive_size, file_active, file_inactive;
+	// unsigned long node_size, node_inactive_size, node_file_active, node_file_inactive;
+	// unsigned long nr_isolated;
 
 	lruvec = mem_cgroup_lruvec(memcg, pgdat); 
-	/*这个函数返回不正确的原因
-	应该是传入的memcg，
-	*/
+	
 	if(lruvec == NULL){
 		printk("lruvec is null");
 	}
     lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
-	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
-	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	// lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	// file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	// file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
 	
-	nr_isolated = node_page_state(pgdat, NR_ISOLATED_ANON) + node_page_state(pgdat, NR_ISOLATED_FILE);
+	// nr_isolated = node_page_state(pgdat, NR_ISOLATED_ANON) + node_page_state(pgdat, NR_ISOLATED_FILE);
 
-	node_size = node_page_state(pgdat, NR_ACTIVE_ANON);
-	node_inactive_size = node_page_state(pgdat, NR_INACTIVE_ANON);
-	node_file_inactive = node_page_state(pgdat, NR_INACTIVE_FILE);
-	node_file_active = node_page_state(pgdat, NR_ACTIVE_FILE);
+	// node_size = node_page_state(pgdat, NR_ACTIVE_ANON);
+	// node_inactive_size = node_page_state(pgdat, NR_INACTIVE_ANON);
+	// node_file_inactive = node_page_state(pgdat, NR_INACTIVE_FILE);
+	// node_file_active = node_page_state(pgdat, NR_ACTIVE_FILE);
     
     if (htmm_mode == HTMM_NO_MIG){
 		//降级的时候咋没判断这个
@@ -148,9 +147,9 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
 		//return 0;
 	}
 
-	printk("the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld \n", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
-	printk("the node mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld \n", node_size, node_inactive_size, node_file_active, node_file_inactive);
-	printk("the node mesg nr_isolated %lu ", nr_isolated);
+	// printk("the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld \n", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+	// printk("the node mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld \n", node_size, node_inactive_size, node_file_active, node_file_inactive);
+	// printk("the node mesg nr_isolated %lu ", nr_isolated);
 
     return lruvec_size;
 }
@@ -696,9 +695,10 @@ static int kmigraterd_promotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
    // edit by 100, 这里做页面 升级 升级 升级 操作，promotes hot pages to fast memory node
 	if (need_lowertier_promotion(pgdat, memcg)) {
 		printk("will do promote_node");
-	    promote_node(pgdat, memcg);
+	    // promote_node(pgdat, memcg);
 	}
-	//promote_node(pgdat, memcg);
+	// TODO:是不是active lru==0有能迁移？
+	promote_node(pgdat, memcg);
 
     return 0;
 }
@@ -715,7 +715,7 @@ static int kmigraterd(void *p)
 	    struct mem_cgroup_per_node *pn;
 	    struct mem_cgroup *memcg;
 		unsigned long nr_available;
-		long nr_demotion;
+		//long nr_demotion;
 	    LIST_HEAD(split_list);
 
 		struct mem_cgroup_per_node *pn2;
@@ -743,30 +743,30 @@ static int kmigraterd(void *p)
 	
 		get_best_action(&nr_action);
 		if(nr_action >0 && nr_action <= INT_MAX){ //如果有行动的话
-			promotion_available(nid, memcg, &nr_available);
-			nr_demotion = (unsigned long)nr_action - nr_available; //可能存在最初空闲太多的情况
-			if(nr_demotion > 0){ //true表示还有空余页面
-				printk("nr demotion %ld", nr_demotion);
-				kmigraterd_demotion(pgdat, memcg, nr_demotion);
+			//可能存在最初空闲太多的情况，但是这个判断一直不太正确
+			//nr_demotion = (unsigned long)nr_action - nr_available; 
+			if(!promotion_available(nid, memcg, &nr_available)){ //true表示还有空余页面
+				//printk("nr demotion %ld", nr_demotion);
+				kmigraterd_demotion(pgdat, memcg, nr_action);
 			}
 		}
 
 		// ---------------------对于升级的操作---------------------------------
 		pn2 = next_memcg_cand(pgdat2); 
-		if(pn2){
-			next_memcg_cand2(pgdat2);
-			// 这个看起来像没有被初始化的
-			//printk("pn2 max nr of page %lu",pn2->max_nr_base_pages);
-		}else{
-			pn2 = next_memcg_cand(pgdat2); 
-			printk("no pn for node 1");
-		}
+		// if(pn2){
+		// 	next_memcg_cand2(pgdat2);
+		// 	// 这个看起来像没有被初始化的
+		// 	//printk("pn2 max nr of page %lu",pn2->max_nr_base_pages);
+		// }else{
+		// 	pn2 = next_memcg_cand(pgdat2); 
+		// 	printk("no pn for node 1");
+		// }
 
 		memcg2 = pn2->memcg;
 		if(nr_action >0 && nr_action <= INT_MAX){
-			if(pgdat2 == NULL){
-				printk("NO PGDAT FOR NODE 1");
-			}
+			// if(pgdat2 == NULL){
+			// 	printk("NO PGDAT FOR NODE 1");
+			// }
 			kmigraterd_promotion(pgdat2, memcg2);
 		}
 		
