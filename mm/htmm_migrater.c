@@ -237,33 +237,33 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
     LIST_HEAD(busy_list);
 
     while (scan < nr_to_scan && !list_empty(src)) {
-	struct page *page;
-	unsigned long nr_pages;
+		struct page *page;
+		unsigned long nr_pages;
 
-	page = lru_to_page(src);
-	prefetchw_prev_lru_page(page, src, flags);
-	VM_WARN_ON(!PageLRU(page));
+		page = lru_to_page(src);
+		prefetchw_prev_lru_page(page, src, flags);
+		VM_WARN_ON(!PageLRU(page));
 
-	nr_pages = compound_nr(page);
-	scan += nr_pages;
+		nr_pages = compound_nr(page);
+		scan += nr_pages;
 
-	if (!__isolate_lru_page_prepare(page, 0)) {
-	    list_move(&page->lru, src);
-	    continue;
-	}
-	if (unlikely(!get_page_unless_zero(page))) {
-	    list_move(&page->lru, src);
-	    continue;
-	}
-	if (!TestClearPageLRU(page)) {
-	    put_page(page);
-	    list_move(&page->lru, src);
-	    continue;
-	}
+		if (!__isolate_lru_page_prepare(page, 0)) {
+	    	list_move(&page->lru, src);
+	    	continue;
+		}
+		if (unlikely(!get_page_unless_zero(page))) {
+	    	list_move(&page->lru, src);
+	    	continue;
+		}
+		if (!TestClearPageLRU(page)) {
+	    	put_page(page);
+	    	list_move(&page->lru, src);
+	    	continue;
+		}
 
-	nr_taken += nr_pages;
-	nr_zone_taken[page_zonenum(page)] += nr_pages;
-	list_move(&page->lru, dst);
+		nr_taken += nr_pages;
+		nr_zone_taken[page_zonenum(page)] += nr_pages;
+		list_move(&page->lru, dst);
     }
 
     update_lru_sizes(lruvec, lru, nr_zone_taken);
@@ -404,34 +404,35 @@ static unsigned long promote_page_list(struct list_head *page_list,
     cond_resched();
 
     while (!list_empty(page_list)) {
-	struct page *page;
+		struct page *page;
 
-	page = lru_to_page(page_list);
-	list_del(&page->lru);
+		page = lru_to_page(page_list);
+		list_del(&page->lru);
 	
-	if (!trylock_page(page))
-	    goto __keep;
-	if (!PageActive(page) && htmm_mode != HTMM_NO_MIG)
-	    goto __keep_locked;
-	if (unlikely(!page_evictable(page)))
-	    goto __keep_locked;
-	if (PageWriteback(page))
-	    goto __keep_locked;
-	if (PageTransHuge(page) && !thp_migration_supported())
-	    goto __keep_locked;
+		if (!trylock_page(page))
+	    	goto __keep;
+		if (!PageActive(page) && htmm_mode != HTMM_NO_MIG)
+	    	goto __keep_locked;
+		if (unlikely(!page_evictable(page)))
+	    	goto __keep_locked;
+		if (PageWriteback(page))
+	    	goto __keep_locked;
+		if (PageTransHuge(page) && !thp_migration_supported())
+	    	goto __keep_locked;
 
-	list_add(&page->lru, &promote_pages);
-	unlock_page(page);
-	continue;
+		list_add(&page->lru, &promote_pages);
+		unlock_page(page);
+		continue;
 __keep_locked:
-	unlock_page(page);
+		unlock_page(page);
 __keep:
-	list_add(&page->lru, &ret_pages);
+		list_add(&page->lru, &ret_pages);
     }
 
     nr_promoted = migrate_page_list(&promote_pages, pgdat, true);
+	printk("promote success nr %ld", nr_promoted);
     if (!list_empty(&promote_pages))
-	list_splice(&promote_pages, page_list);
+		list_splice(&promote_pages, page_list);
 
     list_splice(&ret_pages, page_list);
     return nr_promoted;
@@ -454,7 +455,7 @@ static unsigned long demote_inactive_list(unsigned long nr_to_scan,
     spin_unlock_irq(&lruvec->lru_lock);
 
     if (nr_taken == 0) {
-	return 0;
+		return 0;
     }
 
     nr_reclaimed = shrink_page_list(&page_list, pgdat, lruvec_memcg(lruvec),
@@ -485,9 +486,11 @@ static unsigned long promote_active_list(unsigned long nr_to_scan,
     __mod_node_page_state(pgdat, NR_ISOLATED_ANON, nr_taken);
     spin_unlock_irq(&lruvec->lru_lock);
 
-    if (nr_taken == 0)
-	return 0;
-
+    if (nr_taken == 0){
+		printk("nr of each time isolate %ld", nr_taken);
+		return 0;
+	}
+	
     nr_promoted = promote_page_list(&page_list, pgdat);
 
     spin_lock_irq(&lruvec->lru_lock);
@@ -550,7 +553,7 @@ static unsigned long promote_lruvec(unsigned long nr_to_promote, short priority,
     
     nr = nr_to_promote >> priority;
     if (nr)
-	nr_promoted += promote_active_list(nr, lruvec, lru);
+		nr_promoted += promote_active_list(nr, lruvec, lru);
 
     return nr_promoted;
 }
@@ -577,7 +580,6 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
     
     if (nr_exceeded > nr_evictable_pages)
 		shrink_active = true;
-
 
 
     lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
@@ -627,7 +629,6 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 		priority--;
     } while (priority);
 
-	printk("true promoted %lu", nr_promoted);
     return nr_promoted;
 }
 
