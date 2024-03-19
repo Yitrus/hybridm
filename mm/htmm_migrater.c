@@ -175,30 +175,6 @@ static bool need_toptier_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, un
 	return true;
 }
 
-// static unsigned long node_free_pages(pg_data_t *pgdat)
-// {
-//     int z;
-//     long free_pages;
-//     long total = 0;
-
-//     for (z = pgdat->nr_zones - 1; z >= 0; z--) {
-// 	struct zone *zone = pgdat->node_zones + z;
-// 	long nr_high_wmark_pages;
-
-// 	if (!populated_zone(zone))
-// 	    continue;
-
-// 	free_pages = zone_page_state(zone, NR_FREE_PAGES);
-// 	free_pages -= zone->nr_reserved_highatomic;
-// 	free_pages -= zone->lowmem_reserve[ZONE_MOVABLE];
-
-// 	nr_high_wmark_pages = high_wmark_pages(zone);
-// 	if (free_pages >= nr_high_wmark_pages)
-// 	    total += (free_pages - nr_high_wmark_pages);
-//     }
-//     return (unsigned long)total;
-// }
-
 // 这个函数用于反映DRAM层还剩下多少空间
 static bool promotion_available(int target_nid, struct mem_cgroup *memcg,
 	unsigned long *nr_to_promote)
@@ -621,19 +597,23 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
     short priority = DEF_PRIORITY;
     int target_nid = htmm_cxl_mode ? 0 : next_promotion_node(pgdat->node_id);
 
-	printk("next_promotion_node = %d", target_nid);
     if (!promotion_available(target_nid, memcg, &nr_to_promote)){
-		// 如果表示向上迁移的容量是0
-		printk("promotion_available==0 no promotion");
-		return 0;
+		unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
+		// 如果表示向上迁移的容量是0, 那降级的容量去哪里了？
+		printk("promotion_available==0 next_promotion_node = %d", target_nid);
+		lruvec = mem_cgroup_lruvec(memcg, pgdat); 
+        lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+		lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+		file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+		file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+		printk("the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 	}
 		
     nr_to_promote = min((unsigned long)nr_action, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
-    
-    // if (nr_to_promote == 0 && htmm_mode == HTMM_NO_MIG) {
-	// 	lru = LRU_INACTIVE_ANON;
-	// 	nr_to_promote = min(tmp, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
-    // }
+	if(nr_to_promote == 0){
+		lru = LRU_INACTIVE_ANON;
+		nr_to_promote = min((unsigned long)nr_action, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
+	}
 
 	printk("___-get the promoted %lu-___", nr_to_promote);
 
