@@ -175,29 +175,29 @@ static bool need_toptier_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, un
 	return true;
 }
 
-static unsigned long node_free_pages(pg_data_t *pgdat)
-{
-    int z;
-    long free_pages;
-    long total = 0;
+// static unsigned long node_free_pages(pg_data_t *pgdat)
+// {
+//     int z;
+//     long free_pages;
+//     long total = 0;
 
-    for (z = pgdat->nr_zones - 1; z >= 0; z--) {
-	struct zone *zone = pgdat->node_zones + z;
-	long nr_high_wmark_pages;
+//     for (z = pgdat->nr_zones - 1; z >= 0; z--) {
+// 	struct zone *zone = pgdat->node_zones + z;
+// 	long nr_high_wmark_pages;
 
-	if (!populated_zone(zone))
-	    continue;
+// 	if (!populated_zone(zone))
+// 	    continue;
 
-	free_pages = zone_page_state(zone, NR_FREE_PAGES);
-	free_pages -= zone->nr_reserved_highatomic;
-	free_pages -= zone->lowmem_reserve[ZONE_MOVABLE];
+// 	free_pages = zone_page_state(zone, NR_FREE_PAGES);
+// 	free_pages -= zone->nr_reserved_highatomic;
+// 	free_pages -= zone->lowmem_reserve[ZONE_MOVABLE];
 
-	nr_high_wmark_pages = high_wmark_pages(zone);
-	if (free_pages >= nr_high_wmark_pages)
-	    total += (free_pages - nr_high_wmark_pages);
-    }
-    return (unsigned long)total;
-}
+// 	nr_high_wmark_pages = high_wmark_pages(zone);
+// 	if (free_pages >= nr_high_wmark_pages)
+// 	    total += (free_pages - nr_high_wmark_pages);
+//     }
+//     return (unsigned long)total;
+// }
 
 // 这个函数用于反映DRAM层还剩下多少空间
 static bool promotion_available(int target_nid, struct mem_cgroup *memcg,
@@ -644,6 +644,7 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 		priority--;
     } while (priority);
 
+	printk("true promoted %lu", nr_promoted);
     return nr_promoted;
 }
 
@@ -663,23 +664,23 @@ static struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat)
     return pn;
 }
 
-void next_memcg_cand2(pg_data_t *pgdat)
-{
-    struct mem_cgroup_per_node *pn;
-	struct list_head *tmp;
+// void next_memcg_cand2(pg_data_t *pgdat)
+// {
+//     struct mem_cgroup_per_node *pn;
+// 	struct list_head *tmp;
 
-    spin_lock(&pgdat->kmigraterd_lock);
-    if (!list_empty(&pgdat->kmigraterd_head)) {
-		list_for_each(tmp, &pgdat->kmigraterd_head){
-			pn = list_entry(tmp, typeof(*pn), kmigraterd_list);
-			printk("node 1 memcgroup %lu", pn->max_nr_base_pages);
-		}
-		//list_move_tail(&pn->kmigraterd_list, &pgdat->kmigraterd_head);
-    }
-    spin_unlock(&pgdat->kmigraterd_lock);
+//     spin_lock(&pgdat->kmigraterd_lock);
+//     if (!list_empty(&pgdat->kmigraterd_head)) {
+// 		list_for_each(tmp, &pgdat->kmigraterd_head){
+// 			pn = list_entry(tmp, typeof(*pn), kmigraterd_list);
+// 			printk("node 1 memcgroup %lu", pn->max_nr_base_pages);
+// 		}
+// 		//list_move_tail(&pn->kmigraterd_list, &pgdat->kmigraterd_head);
+//     }
+//     spin_unlock(&pgdat->kmigraterd_lock);
 
-    return;
-}
+//     return;
+// }
 
 static int kmigraterd_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, unsigned long nr_demotion)
 {
@@ -753,6 +754,19 @@ static int kmigraterd(void *p)
 
 		// ---------------------对于升级的操作---------------------------------
 		pn2 = next_memcg_cand(pgdat2); 
+		if (!pn2) { // 如果没有内存控制组就睡眠2s
+	        	msleep_interruptible(2000);
+	        	continue;
+	    }
+		memcg2 = pn2->memcg;
+		//之前没加这个判断可能是多个memcgroup的原因
+		if (!memcg2 || !memcg2->htmm_enabled) {
+	        spin_lock(&pgdat2->kmigraterd_lock);
+	        if (!list_empty_careful(&pn2->kmigraterd_list))
+				list_del(&pn2->kmigraterd_list);
+	        spin_unlock(&pgdat2->kmigraterd_lock);
+	        continue;
+	    }
 		// if(pn2){
 		// 	next_memcg_cand2(pgdat2);
 		// 	// 这个看起来像没有被初始化的
@@ -761,8 +775,7 @@ static int kmigraterd(void *p)
 		// 	pn2 = next_memcg_cand(pgdat2); 
 		// 	printk("no pn for node 1");
 		// }
-
-		memcg2 = pn2->memcg;
+		
 		if(nr_action >0 && nr_action <= INT_MAX){
 			// if(pgdat2 == NULL){
 			// 	printk("NO PGDAT FOR NODE 1");
