@@ -21,9 +21,9 @@ static __u64 get_pebs_event(enum events e)
 {//edit by 100, 带宽的收集包括两者的读取量，还有写入量。
     switch (e) { //但是这些定义和我看到的不太一样啊
 	case DRAMREAD:
-	    return DRAM_LLC_LOAD_MISS;
-	case MEMWRITE:
-	    return ALL_STORES;
+	    return PERF_COUNT_HW_CACHE_MISSES; //，DRAM_LLC_LOAD_MISS
+	// case MEMWRITE:
+	//     return ALL_STORES;
 	case CPU_CYCLES:
 		return PERF_COUNT_HW_CPU_CYCLES;
 	case INSTRUCTIONS:
@@ -42,12 +42,13 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
 
     memset(&attr, 0, sizeof(struct perf_event_attr));
 
-	if(config != PERF_COUNT_HW_CPU_CYCLES && config != PERF_COUNT_HW_INSTRUCTIONS){
-		// 要检测的类型有硬件和自定义类，因为原本的自定义类型表现的很好所以保留
-		attr.type = PERF_TYPE_RAW; 
-	}else{
-		attr.type = PERF_TYPE_HARDWARE; 
-	}
+	// if(config != PERF_COUNT_HW_CPU_CYCLES && config != PERF_COUNT_HW_INSTRUCTIONS){
+	// 	// 要检测的类型有硬件和自定义类，因为原本的自定义类型表现的很好所以保留
+	// 	attr.type = PERF_TYPE_RAW; 
+	// }else{
+	// 	attr.type = PERF_TYPE_HARDWARE; 
+	// }
+	attr.type = PERF_TYPE_HARDWARE; 
     attr.size = sizeof(struct perf_event_attr);
     attr.config = config; //要监测的采样事件
     attr.config1 = config1;
@@ -122,7 +123,6 @@ static void pebs_disable(void)
 {
     int cpu, event;
 
-
     for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 	for (event = 0; event < N_HTMMEVENTS; event++) {
 	    if (mem_event[cpu][event])
@@ -137,7 +137,7 @@ static int ksamplingd(void *data)
 	//edit by 100, 计算
     unsigned long long nr_throttled = 0, nr_lost = 0, nr_unknown = 0;
 	unsigned long sleep_timeout;
-	sleep_timeout = usecs_to_jiffies(2000);
+	sleep_timeout = usecs_to_jiffies(20000);
 
     const struct cpumask *cpumask = cpumask_of_node(0);
     if (!cpumask_empty(cpumask))
@@ -147,10 +147,13 @@ static int ksamplingd(void *data)
 		int cpu, event, cond = false;
     
 		if (htmm_mode == HTMM_NO_MIG) {
-			msleep_interruptible(10000);
+			msleep_interruptible(100000);
 			continue;
 		}
 	
+		nr_bw = 0;
+		nr_cyc = 0;
+		nr_ins = 0;
 		for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 			for (event = 0; event < N_HTMMEVENTS; event++) {
 				//处理某个cpu的某个事件的采样缓冲区数据
@@ -181,7 +184,7 @@ static int ksamplingd(void *data)
 					if (head == up->data_tail) { // 检查环形缓冲区是否有新数据（即头尾指针不相等）
 						// if (cpu < 16) //为啥是16啊？
 						// 	nr_skip++;
-						//continue;
+						// continue;
 						break;
 					}
 
@@ -214,16 +217,16 @@ static int ksamplingd(void *data)
 						case PERF_RECORD_SAMPLE:
 							he = (struct htmm_event *)ph;
 
-							if (event == DRAMREAD || event == MEMWRITE) {
+							//if (event == DRAMREAD || event == MEMWRITE) {
+							if (event == DRAMREAD) {
 								nr_bw += he->ip;
 							}
 							else if (event == CPU_CYCLES) {
-								nr_cyc += he->ip;;
+								nr_cyc += he->ip;
 							}
 							else if(event == INSTRUCTIONS){
 								nr_ins += he->ip;
 							}
-								
 							break;
 						// 节流（减少数据采集频率）
 						case PERF_RECORD_THROTTLE:
@@ -240,16 +243,15 @@ static int ksamplingd(void *data)
 							nr_unknown++;
 							break;
 					}
-					update_stats(nr_bw, nr_cyc, nr_ins);
-					nr_bw = 0;
-					nr_cyc = 0;
-					nr_ins = 0;
 					/* read, write barrier 确保所有先前的写操作完成，然后更新环形缓冲区的 data_tail，以指向下一个待处理的采样数据的位置。*/
 					smp_mb();
 					WRITE_ONCE(up->data_tail, up->data_tail + ph->size);
 				} while (cond);
 			}
 		}	
+		
+		update_stats(nr_bw, nr_cyc, nr_ins);
+		
 		/* if ksampled_soft_cpu_quota is zero, disable dynamic pebs feature */
 		if (!ksampled_soft_cpu_quota)
 			continue;
@@ -278,26 +280,26 @@ static int ksamplingd_run(void)
 
 int ksamplingd_init(pid_t pid, int node)
 { //希望在调试迁移线程时不受采样线程影响
-    // int ret;
+    int ret;
 
-    // if (access_sampling)
-	// 	return 0;
+    if (access_sampling)
+		return 0;
 
-    // ret = pebs_init(pid, node); //采样线程从这里就在报错了，应该就是core按照server定义的，多了
-    // if (ret) {
-	// 	printk("htmm__perf_event_init failure... ERROR:%d", ret);
-	// 	return 0;
-    // }
+    ret = pebs_init(pid, node); //采样线程从这里就在报错了，应该就是core按照server定义的，多了
+    if (ret) {
+		printk("htmm__perf_event_init failure... ERROR:%d", ret);
+		return 0;
+    }
 
-    // return ksamplingd_run();
+    return ksamplingd_run();
 	return 0;
 }
 
 void ksamplingd_exit(void)
 {
-    // if (access_sampling) {
-	// 	kthread_stop(access_sampling);
-	// 	access_sampling = NULL;
-    // }
-    // pebs_disable();
+    if (access_sampling) { //初始化时为NULL
+		kthread_stop(access_sampling);
+		access_sampling = NULL;
+    }
+    pebs_disable();
 }

@@ -7,7 +7,7 @@
 
 #define BUFFER_SIZE	32 /* 128: 1MB */
 //edit by 100, ubuntu20那台是旧服务器12个核心一个socket，而新电脑ubuntu18那台是28个核心
-#define CPUS_PER_SOCKET 8
+#define CPUS_PER_SOCKET 16
 #define MAX_MIGRATION_RATE_IN_MBPS  2048 /* 2048MB per sec */
 
 
@@ -114,8 +114,7 @@ extern void set_lru_adjusting(struct mem_cgroup *memcg, bool inc_thres);
 extern void update_stats(unsigned long long bw, unsigned long long cyc, unsigned long long ins);
 
 extern bool deferred_split_huge_page_for_htmm(struct page *page);
-extern unsigned long deferred_split_scan_for_htmm(struct mem_cgroup_per_node *pn,
-						  struct list_head *split_list);
+extern unsigned long deferred_split_scan_for_htmm(struct mem_cgroup_per_node *pn, struct list_head *split_list);
 extern void putback_split_pages(struct list_head *split_list, struct lruvec *lruvec);
 
 extern bool check_split_huge_page(struct mem_cgroup *memcg, struct page *meta, bool hot);
