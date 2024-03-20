@@ -309,24 +309,33 @@ static unsigned long migrate_page_list(struct list_head *migrate_list,
     int target_nid;
     unsigned int nr_succeeded = 0;
 
-    if (promotion)
-	target_nid = htmm_cxl_mode ? 0 : next_promotion_node(pgdat->node_id);
+    if (promotion){
+		target_nid = htmm_cxl_mode ? 0 : next_promotion_node(pgdat->node_id);
+		//printk("promotion target_nid %d", target_nid);
+	}
     else
-	target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
+		target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
 
-    if (list_empty(migrate_list))
-	return 0;
+    if (list_empty(migrate_list)){
+		printk("migrate_page_list empty and over");
+		return 0;
+	}
 
-    if (target_nid == NUMA_NO_NODE)
-	return 0;
+    if (target_nid == NUMA_NO_NODE){
+		printk("promotion target_nid %d == NUMA_NO_NODE over", target_nid);
+		return 0;
+	}
+		
 
     migrate_pages(migrate_list, alloc_migrate_page, NULL,
 	    target_nid, MIGRATE_ASYNC, MR_NUMA_MISPLACED, &nr_succeeded);
 
-    if (promotion)
-	count_vm_events(HTMM_NR_PROMOTED, nr_succeeded);
+    if (promotion){
+		printk("promote success nr %d", nr_succeeded);
+		count_vm_events(HTMM_NR_PROMOTED, nr_succeeded);
+	}
     else
-	count_vm_events(HTMM_NR_DEMOTED, nr_succeeded);
+		count_vm_events(HTMM_NR_DEMOTED, nr_succeeded);
 
     return nr_succeeded;
 }
@@ -417,20 +426,26 @@ static unsigned long promote_page_list(struct list_head *page_list,
 	    	goto __keep_locked;
 		if (PageWriteback(page))
 	    	goto __keep_locked;
-		if (PageTransHuge(page) && !thp_migration_supported())
-	    	goto __keep_locked;
-
+		if (PageTransHuge(page) && !thp_migration_supported()){
+			printk("thp unsupport? %d", thp_migration_supported());
+			goto __keep_locked;
+		}
+	    	
+		//但是这个链表是空的？
+		printk("ready promote page");
 		list_add(&page->lru, &promote_pages);
 		unlock_page(page);
 		continue;
 __keep_locked:
 		unlock_page(page);
 __keep:
+		//printk("ready promote page");
+		//大部分页面加入这个链表了，都没办法迁移。
 		list_add(&page->lru, &ret_pages);
     }
 
     nr_promoted = migrate_page_list(&promote_pages, pgdat, true);
-	printk("promote success nr %ld", nr_promoted);
+	
     if (!list_empty(&promote_pages))
 		list_splice(&promote_pages, page_list);
 
@@ -613,6 +628,8 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
     enum lru_list lru = LRU_ACTIVE_ANON;
     short priority = DEF_PRIORITY;
 	//int target_nid = htmm_cxl_mode ? 0 : next_promotion_node(pgdat->node_id);
+
+	unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
 		
     nr_to_promote = min((unsigned long)nr_action, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
 	if(nr_to_promote == 0){
@@ -620,7 +637,13 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 		nr_to_promote = min((unsigned long)nr_action, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
 	}
 
-	printk("___-get the promoted %lu-___", nr_to_promote);
+	//printk("___-get the promoted %lu-___", nr_to_promote);
+	lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	printk("PM NODE BEFORE the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+
 
     do {
 		nr_promoted += promote_lruvec(nr_to_promote, priority, pgdat, lruvec, lru);
@@ -628,6 +651,12 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 	    	break;
 		priority--;
     } while (priority);
+
+	lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	printk("PM NODE AFTER the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 
     return nr_promoted;
 }
@@ -692,7 +721,7 @@ static int kmigraterd(void *p)
 {
     pg_data_t *pgdat = (pg_data_t *)p;
     int nid = pgdat->node_id;
-	pg_data_t *pgdat2 = NODE_DATA(1);
+	pg_data_t *pgdat2 = NODE_DATA(2);
 
 // edit by 100,假设已经获得需要操作的数量，现在判断上下应该被迁移的数目
 // 这些操作是根据cgroup来做的, 遍历node 0的
@@ -783,14 +812,14 @@ void kmigraterd_wakeup(int nid)
 static void kmigraterd_run(int nid)
 {
     pg_data_t *pgdat = NODE_DATA(nid);
-	pg_data_t *pgdat2 = NODE_DATA(1);
+	pg_data_t *pgdat2 = NODE_DATA(2);
     if (!pgdat || pgdat->kmigraterd){
 		printk("node 0 struct null");
 		return;
 	}
 
 	if (!pgdat2 || pgdat2->kmigraterd){
-		printk("node 1 struct null");
+		printk("node 2 struct null");
 		return;
 	}
 		
@@ -806,7 +835,7 @@ static void kmigraterd_run(int nid)
     }
 
 	if (IS_ERR(pgdat2->kmigraterd)) {
-		pr_err("Fails to start kmigraterd on node 1");
+		pr_err("Fails to start kmigraterd on node 2");
 		pgdat2->kmigraterd = NULL;
     }
 }
@@ -822,7 +851,7 @@ void kmigraterd_stop(void)
 		if (km) {
 	    	kthread_stop(km);
 	    	NODE_DATA(nid)->kmigraterd = NULL;
-			NODE_DATA(1)->kmigraterd = NULL;
+			NODE_DATA(2)->kmigraterd = NULL;
 		}
     //}
 }

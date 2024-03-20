@@ -3813,7 +3813,8 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	do {
 	    struct mem_cgroup *memcg = get_mem_cgroup_from_mm(vma->vm_mm);
 	    if (!memcg) {
-		ClearPageActive(page);
+			//为啥一定是没在cgroup里就要被取消active？
+			//ClearPageActive(page);
 	    }
 	} while (0);
 	if (page != NULL && node_is_toptier(page_to_nid(page)))

@@ -2128,7 +2128,7 @@ struct page *alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 				break;
 			}
 			if ((nid = next_demotion_node(nid)) == NUMA_NO_NODE) {
-				nid = 1;
+				nid = 2;
 				break;
 			}
 			max_nr_pages = READ_ONCE(memcg->nodeinfo[nid]->max_nr_base_pages);
