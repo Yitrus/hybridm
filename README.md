@@ -1,6 +1,7 @@
 # TODO:
 8. 页面被锁住无法向上迁移。
 9. active lru几乎都为null.
+10. 训练需要的接口echo没有改变数值
 
 
 # Problem：
