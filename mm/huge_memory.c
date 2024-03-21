@@ -2150,16 +2150,16 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 
 		pte_pginfo->nr_accesses = tail_pginfo->nr_accesses;
 		pte_pginfo->total_accesses = tail_pginfo->total_accesses;
-		pte_pginfo->cooling_clock = tail_pginfo->cooling_clock;
+		// pte_pginfo->cooling_clock = tail_pginfo->cooling_clock;
 		
-		if (get_idx(pte_pginfo->total_accesses) >= (memcg->active_threshold - 1))
-		    SetPageActive(&page[i]);
-		else
-		    ClearPageActive(&page[i]);
+		// if (get_idx(pte_pginfo->total_accesses) >= (memcg->active_threshold - 1))
+		//     SetPageActive(&page[i]);
+		// else
+		//     ClearPageActive(&page[i]);
 
-		spin_lock(&memcg->access_lock);
-		memcg->hotness_hg[get_idx(pte_pginfo->total_accesses)]++;
-		spin_unlock(&memcg->access_lock);
+		// spin_lock(&memcg->access_lock);
+		// memcg->hotness_hg[get_idx(pte_pginfo->total_accesses)]++;
+		// spin_unlock(&memcg->access_lock);
 		/* Htmm flag will be cleared later */
 		/* ClearPageHtmm(&page[i]); */
 	    }
@@ -2827,22 +2827,22 @@ int split_huge_page_to_list(struct page *page, struct list_head *list)
 				filemap_nr_thps_dec(mapping);
 			}
 		}
-#ifdef CONFIG_HTMM
-		{
-		    struct mem_cgroup *memcg = page_memcg(head);
-		    unsigned int idx;
+// #ifdef CONFIG_HTMM
+// 		{
+// 		    struct mem_cgroup *memcg = page_memcg(head);
+// 		    unsigned int idx;
 
-		    spin_lock(&memcg->access_lock);
-		    idx = head[3].idx;
+// 		    spin_lock(&memcg->access_lock);
+// 		    idx = head[3].idx;
 
-		    if (memcg->hotness_hg[idx] < HPAGE_PMD_NR)
-			memcg->hotness_hg[idx] = 0;
-		    else
-			memcg->hotness_hg[idx] -= HPAGE_PMD_NR;
+// 		    if (memcg->hotness_hg[idx] < HPAGE_PMD_NR)
+// 			memcg->hotness_hg[idx] = 0;
+// 		    else
+// 			memcg->hotness_hg[idx] -= HPAGE_PMD_NR;
 
-		    spin_unlock(&memcg->access_lock);
-		}
-#endif
+// 		    spin_unlock(&memcg->access_lock);
+// 		}
+// #endif
 		__split_huge_page(page, list, end);
 		ret = 0;
 	} else {
@@ -2957,58 +2957,59 @@ static unsigned long deferred_split_scan(struct shrinker *shrink,
 #ifdef CONFIG_MEMCG
 	if (sc->memcg)
 		ds_queue = &sc->memcg->deferred_split_queue;
-#ifdef CONFIG_HTMM
-	if (sc->memcg) {
-	    int nid, nr_nonempty = 0;
-	    
-	    for_each_node_state(nid, N_MEMORY) {
-		struct mem_cgroup_per_node *pn = sc->memcg->nodeinfo[nid];
-		struct deferred_split *pn_ds_queue = &pn->deferred_split_queue;
-		
-		if (list_empty(&pn_ds_queue->split_queue))
-		    continue;
-		
-		spin_lock_irqsave(&pn_ds_queue->split_queue_lock, flags);
-		list_for_each_safe(pos, next, &pn_ds_queue->split_queue) {
-		    page = list_entry((void *)pos, struct page, deferred_list);
-		    page = compound_head(page);
-		    if (get_page_unless_zero(page))
-			list_move(page_deferred_list(page), &list);
-		    else {
-			list_del_init(page_deferred_list(page));
-			pn_ds_queue->split_queue_len--;
-		    }
-		    if (!--sc->nr_to_scan)
-			break;
-		}
-		spin_unlock_irqrestore(&pn_ds_queue->split_queue_lock, flags);
-		    list_for_each_safe(pos, next, &list) {
-			page = list_entry((void *)pos, struct page, deferred_list);
-			if (!trylock_page(page))
-			    goto next;
-			/* split_huge_page() removes page from list on success */
-			if (!split_huge_page(page))
-			    split++;
-			unlock_page(page);
-next:
-			put_page(page);
-		}
-
-		spin_lock_irqsave(&pn_ds_queue->split_queue_lock, flags);
-		list_splice_tail(&list, &pn_ds_queue->split_queue);
-		spin_unlock_irqrestore(&pn_ds_queue->split_queue_lock, flags);
-
-		if (!list_empty(&pn_ds_queue->split_queue))
-		    nr_nonempty++;
-	    }
-	    
-	    if (!split && !nr_nonempty)
-		return SHRINK_STOP;
-	}
-	return split;
 #endif
-#endif
-#ifndef CONFIG_HTMM
+// #ifdef CONFIG_HTMM
+// 	if (sc->memcg) {
+// 	    int nid, nr_nonempty = 0;
+	    
+// 	    for_each_node_state(nid, N_MEMORY) {
+// 		struct mem_cgroup_per_node *pn = sc->memcg->nodeinfo[nid];
+// 		struct deferred_split *pn_ds_queue = &pn->deferred_split_queue;
+		
+// 		if (list_empty(&pn_ds_queue->split_queue))
+// 		    continue;
+		
+// 		spin_lock_irqsave(&pn_ds_queue->split_queue_lock, flags);
+// 		list_for_each_safe(pos, next, &pn_ds_queue->split_queue) {
+// 		    page = list_entry((void *)pos, struct page, deferred_list);
+// 		    page = compound_head(page);
+// 		    if (get_page_unless_zero(page))
+// 			list_move(page_deferred_list(page), &list);
+// 		    else {
+// 			list_del_init(page_deferred_list(page));
+// 			pn_ds_queue->split_queue_len--;
+// 		    }
+// 		    if (!--sc->nr_to_scan)
+// 			break;
+// 		}
+// 		spin_unlock_irqrestore(&pn_ds_queue->split_queue_lock, flags);
+// 		    list_for_each_safe(pos, next, &list) {
+// 			page = list_entry((void *)pos, struct page, deferred_list);
+// 			if (!trylock_page(page))
+// 			    goto next;
+// 			/* split_huge_page() removes page from list on success */
+// 			if (!split_huge_page(page))
+// 			    split++;
+// 			unlock_page(page);
+// next:
+// 			put_page(page);
+// 		}
+
+// 		spin_lock_irqsave(&pn_ds_queue->split_queue_lock, flags);
+// 		list_splice_tail(&list, &pn_ds_queue->split_queue);
+// 		spin_unlock_irqrestore(&pn_ds_queue->split_queue_lock, flags);
+
+// 		if (!list_empty(&pn_ds_queue->split_queue))
+// 		    nr_nonempty++;
+// 	    }
+	    
+// 	    if (!split && !nr_nonempty)
+// 		return SHRINK_STOP;
+// 	}
+// 	return split;
+// #endif
+// #endif
+// #ifndef CONFIG_HTMM
 	spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
 	/* Take pin on all head pages to avoid freeing them under us */
 	list_for_each_safe(pos, next, &ds_queue->split_queue) {
@@ -3049,7 +3050,7 @@ next:
 	if (!split && list_empty(&ds_queue->split_queue))
 		return SHRINK_STOP;
 	return split;
-#endif
+// #endif
 }
 
 static struct shrinker deferred_split_shrinker = {
@@ -3397,11 +3398,11 @@ void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct page *new)
 	else
 		page_add_file_rmap(new, true);
 	set_pmd_at(mm, mmun_start, pvmw->pmd, pmde);
-#ifdef CONFIG_HTMM
-	{
-	    check_transhuge_cooling(NULL, new, true);
-	}
-#endif
+// #ifdef CONFIG_HTMM
+// 	{
+// 	    check_transhuge_cooling(NULL, new, true);
+// 	}
+// #endif
 	if ((vma->vm_flags & VM_LOCKED) && !PageDoubleMap(new))
 		mlock_vma_page(new);
 	update_mmu_cache_pmd(vma, address, pvmw->pmd);
