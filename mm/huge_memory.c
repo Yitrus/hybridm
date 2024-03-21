@@ -508,11 +508,11 @@ struct deferred_split *get_deferred_split_queue(struct page *page)
 	if (memcg)
 #ifdef CONFIG_HTMM
 	{
-		if (memcg->htmm_enabled) {
-			struct mem_cgroup_per_node *pn = memcg->nodeinfo[page_to_nid(page)];
-			return &pn->deferred_split_queue;
-		}
-		else
+		// if (memcg->htmm_enabled) {
+		// 	struct mem_cgroup_per_node *pn = memcg->nodeinfo[page_to_nid(page)];
+		// 	return &pn->deferred_split_queue;
+		// }
+		// else
 		    return &memcg->deferred_split_queue;
 	}
 #else

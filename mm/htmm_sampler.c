@@ -53,8 +53,8 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     attr.config = config; //要监测的采样事件
     attr.config1 = config1;
 
-	attr.sample_period = 100007;
-	// 采样事件间隔，这里将其设计为一个固定的值，其实就是把htmm_inst_sample_period的值拿出来了而已
+	attr.sample_period = 1000007;
+	// 采样事件间隔，这里将其设计为一个固定的值，其实就是把htmm_inst_sample_period的值100007拿出来了x10而已
 
     attr.sample_type = PERF_SAMPLE_IP; //要采样的信息是什么，IP就是对应的值，TID先保留看需不需要过滤线程， | PERF_SAMPLE_TID
     attr.disabled = 0;
@@ -138,7 +138,7 @@ static int ksamplingd(void *data)
     unsigned long long nr_throttled = 0, nr_lost = 0, nr_unknown = 0;
 	unsigned long sleep_timeout;
 	sleep_timeout = usecs_to_jiffies(20000);
-
+	
     const struct cpumask *cpumask = cpumask_of_node(0);
     if (!cpumask_empty(cpumask))
 		do_set_cpus_allowed(access_sampling, cpumask);
@@ -250,6 +250,7 @@ static int ksamplingd(void *data)
 			}
 		}	
 		
+		//如果不能解释为什么出现多个为0的情况，就加一句判断
 		update_stats(nr_bw, nr_cyc, nr_ins);
 		
 		/* if ksampled_soft_cpu_quota is zero, disable dynamic pebs feature */
