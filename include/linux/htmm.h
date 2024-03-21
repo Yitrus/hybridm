@@ -7,16 +7,16 @@
 
 #define BUFFER_SIZE	32 /* 128: 1MB */
 //edit by 100, ubuntu20那台是旧服务器12个核心一个socket，而新电脑ubuntu18那台是28个核心
-#define CPUS_PER_SOCKET 16
+#define CPUS_PER_SOCKET 12
 #define MAX_MIGRATION_RATE_IN_MBPS  2048 /* 2048MB per sec */
 
 
 /* pebs events */
 // edit by yxy, 需要重新定义要采样的事件
-#define DRAM_LLC_LOAD_MISS  0x1d3 //这个肯定会读DRAM也会被访问留下
+#define DRAM_LLC_LOAD_MISS  0x1d3 //这个肯定会读DRAM也会被访问留下,但是内容为null
 #define REMOTE_DRAM_LLC_LOAD_MISS   0x2d3 /* unused */
 #define NVM_LLC_LOAD_MISS   0x80d1 /* unused */
-#define ALL_STORES	    0x82d0 //这个表示对于所有内存的写入，就还好
+#define ALL_STORES	    0x82d0 //这个表示对于所有内存的写入，就还好；采样得到的内容为null
 #define ALL_LOADS	    0x81d0 /* unused */
 #define STLB_MISS_STORES    0x12d0 /* unused */
 #define STLB_MISS_LOADS	    0x11d0 /* unused */
@@ -104,38 +104,27 @@ extern void copy_transhuge_pginfo(struct page *page,
 				  struct page *newpage);
 extern pginfo_t *get_compound_pginfo(struct page *page, unsigned long address);
 
-extern void check_transhuge_cooling(void *arg, struct page *page, bool locked);
-extern void check_base_cooling(pginfo_t *pginfo, struct page *page, bool locked);
-extern int set_page_coolstatus(struct page *page, pte_t *pte, struct mm_struct *mm);
+//如果要改变lru的active部分，可能会借鉴这些
+// extern void check_transhuge_cooling(void *arg, struct page *page, bool locked);
+// extern void check_base_cooling(pginfo_t *pginfo, struct page *page, bool locked);
+// extern int set_page_coolstatus(struct page *page, pte_t *pte, struct mm_struct *mm);
 
 extern void set_lru_adjusting(struct mem_cgroup *memcg, bool inc_thres);
 
 //extern void update_pginfo(pid_t pid, unsigned long address, enum events e);
 extern void update_stats(unsigned long long bw, unsigned long long cyc, unsigned long long ins);
 
-extern bool deferred_split_huge_page_for_htmm(struct page *page);
-extern unsigned long deferred_split_scan_for_htmm(struct mem_cgroup_per_node *pn, struct list_head *split_list);
-extern void putback_split_pages(struct list_head *split_list, struct lruvec *lruvec);
-
-extern bool check_split_huge_page(struct mem_cgroup *memcg, struct page *meta, bool hot);
-extern bool move_page_to_deferred_split_queue(struct mem_cgroup *memcg, struct page *page);
-
 extern void move_page_to_active_lru(struct page *page);
 extern void move_page_to_inactive_lru(struct page *page);
-
 
 extern struct page *get_meta_page(struct page *page);
 extern unsigned int get_accesses_from_idx(unsigned int idx);
 extern unsigned int get_idx(unsigned long num);
-extern int get_skew_idx(unsigned long num);
 extern void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg);
 extern void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 extern void charge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 
-
-extern void set_lru_split_pid(pid_t pid);
 extern void adjust_active_threshold(pid_t pid);
-extern void set_lru_cooling_pid(pid_t pid);
 
 /* htmm_sampler.c */
 extern unsigned long long nr_bw, nr_cyc, nr_ins;
@@ -151,58 +140,6 @@ static inline unsigned long get_sample_period(unsigned long cur) {
     else
 	return pebs_period_list[pcount - 1];
 }
-
-static inline unsigned long get_sample_inst_period(unsigned long cur) {
-    if (cur < 0)
-	return 0;
-    else if (cur < pinstcount)
-	return pebs_inst_period_list[cur];
-    else
-	return pebs_inst_period_list[pinstcount - 1];
-}
-#if 1
-static inline void increase_sample_period(unsigned long *llc_period,
-					  unsigned long *inst_period) {
-    unsigned long p;
-    p = *llc_period;
-    if (++p < pcount)
-	*llc_period = p;
-    
-    p = *inst_period;
-    if (++p < pinstcount)
-	*inst_period = p;
-}
-
-static inline void decrease_sample_period(unsigned long *llc_period,
-					  unsigned long *inst_period) {
-    unsigned long p;
-    p = *llc_period;
-    if (p > 0)
-	*llc_period = p - 1;
-    
-    p = *inst_period;
-    if (p > 0)
-	*inst_period = p - 1;
-}
-#else
-static inline unsigned int increase_sample_period(unsigned int cur,
-						  unsigned int next) {
-    do {
-	cur++;
-    } while (pebs_period_list[cur] < next && cur < pcount);
-    
-    return cur < pcount ? cur : pcount - 1;
-}
-
-static inline unsigned int decrease_sample_period(unsigned int cur,
-						  unsigned int next) {
-    do {
-	cur--;
-    } while (pebs_period_list[cur] > next && cur > 0);
-    
-    return cur;
-}
-#endif
 
 
 /* htmm_migrater.c */
