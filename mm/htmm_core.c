@@ -68,9 +68,9 @@ void prep_transhuge_page_for_htmm(struct vm_area_struct *vma,
     prep_transhuge_page(page);
 
     if (vma->vm_mm->htmm_enabled)
-	__prep_transhuge_page_for_htmm(vma->vm_mm, page);
+	    __prep_transhuge_page_for_htmm(vma->vm_mm, page);
     else
-	return;
+	    return;
 }
 
 void clear_transhuge_pginfo(struct page *page)
@@ -264,6 +264,7 @@ void free_pginfo_pte(struct page *pte)
     ClearPageHtmm(pte);
 }
 
+// 申请的虚拟页，要中断时才能和物理页联系起来
 void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg)
 {
     struct page *pte_page;
@@ -275,11 +276,11 @@ void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg)
     
     pte_page = virt_to_page((unsigned long)pte);
     if (!PageHtmm(pte_page))
-	return;
+	    return;
 
     pginfo = get_pginfo_from_pte(pte);
     if (!pginfo)
-	return;
+	    return;
 
     idx = get_idx(pginfo->total_accesses);
 }
@@ -294,9 +295,9 @@ void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg)
     
     page = compound_head(page);
     if (nr_pages != 1) { // hugepage
-	struct page *meta = get_meta_page(page);
+	    struct page *meta = get_meta_page(page);
 
-	idx = meta->idx;
+	    idx = meta->idx;
     }
 }
 

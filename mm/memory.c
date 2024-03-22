@@ -3827,9 +3827,7 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	lru_cache_add_inactive_or_unevictable(page, vma);
 setpte:
 	set_pte_at(vma->vm_mm, vmf->address, vmf->pte, entry);
-// #ifdef CONFIG_HTMM
-// 	set_page_coolstatus(page, vmf->pte, vma->vm_mm);
-// #endif
+
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache(vma, vmf->address, vmf->pte);
 unlock:
