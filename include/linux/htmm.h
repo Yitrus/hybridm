@@ -7,7 +7,7 @@
 
 #define BUFFER_SIZE	32 /* 128: 1MB */
 //edit by 100, ubuntu20那台是旧服务器12个核心一个socket，而新电脑ubuntu18那台是28个核心
-#define CPUS_PER_SOCKET 12
+#define CPUS_PER_SOCKET 24
 #define MAX_MIGRATION_RATE_IN_MBPS  2048 /* 2048MB per sec */
 
 
@@ -104,14 +104,6 @@ extern void copy_transhuge_pginfo(struct page *page,
 				  struct page *newpage);
 extern pginfo_t *get_compound_pginfo(struct page *page, unsigned long address);
 
-//如果要改变lru的active部分，可能会借鉴这些
-// extern void check_transhuge_cooling(void *arg, struct page *page, bool locked);
-// extern void check_base_cooling(pginfo_t *pginfo, struct page *page, bool locked);
-// extern int set_page_coolstatus(struct page *page, pte_t *pte, struct mm_struct *mm);
-
-extern void set_lru_adjusting(struct mem_cgroup *memcg, bool inc_thres);
-
-//extern void update_pginfo(pid_t pid, unsigned long address, enum events e);
 extern void update_stats(unsigned long long bw, unsigned long long cyc, unsigned long long ins);
 
 extern void move_page_to_active_lru(struct page *page);
@@ -124,22 +116,11 @@ extern void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg);
 extern void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 extern void charge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 
-extern void adjust_active_threshold(pid_t pid);
-
 /* htmm_sampler.c */
 extern unsigned long long nr_bw, nr_cyc, nr_ins;
 
 extern int ksamplingd_init(pid_t pid, int node);
 extern void ksamplingd_exit(void);
-
-static inline unsigned long get_sample_period(unsigned long cur) {
-    if (cur < 0)
-	return 0;
-    else if (cur < pcount)
-	return pebs_period_list[cur];
-    else
-	return pebs_period_list[pcount - 1];
-}
 
 
 /* htmm_migrater.c */

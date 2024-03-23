@@ -7611,8 +7611,7 @@ static ssize_t action_write(struct kernfs_open_file *of,
 		printk("action write failed");
 		return err;
 	}
-	train_action = (int)train_action;
-	xchg(&nr_action, train_action);
+	nr_action = (unsigned int)train_action;
 
 	printk("have been write %d", nr_action);
 
