@@ -584,7 +584,7 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
     enum lru_list lru;
     bool shrink_active = false;
 
-	// unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
+	unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
 
     for_each_evictable_lru(lru) {
 		if (!is_file_lru(lru) && is_active_lru(lru))
@@ -599,11 +599,11 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 		shrink_active = true;
 
 
-    // lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	// lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
-	// file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
-	// file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
-	// printk("BEFORE the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+    lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	printk("BEFORE the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 
 
     do {
@@ -614,11 +614,11 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 		priority--;
     } while (priority);
 
-	// lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	// lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
-	// file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
-	// file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
-	// printk("AFTER the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+	lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	printk("AFTER the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 
     return nr_reclaimed;
 }
@@ -631,7 +631,7 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
     short priority = DEF_PRIORITY;
 	//int target_nid = htmm_cxl_mode ? 0 : next_promotion_node(pgdat->node_id);
 
-	// unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
+	unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
 		
     nr_to_promote = min((unsigned long)nr_action, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
 	if(nr_to_promote == 0){
@@ -641,11 +641,11 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 
 	// printk("___get the promoted %lu___", nr_to_promote);
 
-	// lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	// lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
-	// file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
-	// file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
-	// printk("PM NODE BEFORE the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+	lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	printk("PM NODE BEFORE the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 
 
     do {
@@ -655,11 +655,11 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 		priority--;
     } while (priority);
 
-	// lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	// lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
-	// file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
-	// file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
-	// printk("PM NODE AFTER the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+	lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	printk("PM NODE AFTER the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 
     return nr_promoted;
 }

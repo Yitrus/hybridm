@@ -1622,9 +1622,9 @@ int zap_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 
 		if (pmd_present(orig_pmd)) {
 			page = pmd_page(orig_pmd);
-#ifdef CONFIG_HTMM
-			uncharge_htmm_page(page, get_mem_cgroup_from_mm(vma->vm_mm));
-#endif
+// #ifdef CONFIG_HTMM
+// 			uncharge_htmm_page(page, get_mem_cgroup_from_mm(vma->vm_mm));
+// #endif
 			page_remove_rmap(page, true);
 			VM_BUG_ON_PAGE(page_mapcount(page) < 0, page);
 			VM_BUG_ON_PAGE(!PageHead(page), page);

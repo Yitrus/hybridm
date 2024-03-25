@@ -137,41 +137,41 @@ struct list_head *get_deferred_list(struct page *page)
 	return &pn->deferred_list; 
 }
 
-bool deferred_split_huge_page_for_htmm(struct page *page)
-{
-    struct deferred_split *ds_queue = get_deferred_split_queue(page);
-    unsigned long flags;
+// bool deferred_split_huge_page_for_htmm(struct page *page)
+// {
+//     struct deferred_split *ds_queue = get_deferred_split_queue(page);
+//     unsigned long flags;
 
-    VM_BUG_ON_PAGE(!PageTransHuge(page), page);
+//     VM_BUG_ON_PAGE(!PageTransHuge(page), page);
 
-    if (PageSwapCache(page))
-	return false;
+//     if (PageSwapCache(page))
+// 	return false;
 
-    if (!ds_queue)
-	return false;
+//     if (!ds_queue)
+// 	return false;
     
-    spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
-    if (list_empty(page_deferred_list(page))) {
-	count_vm_event(THP_DEFERRED_SPLIT_PAGE);
-	list_add_tail(page_deferred_list(page), &ds_queue->split_queue);
-	ds_queue->split_queue_len++;
+//     spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
+//     if (list_empty(page_deferred_list(page))) {
+// 	count_vm_event(THP_DEFERRED_SPLIT_PAGE);
+// 	list_add_tail(page_deferred_list(page), &ds_queue->split_queue);
+// 	ds_queue->split_queue_len++;
 
-	if (node_is_toptier(page_to_nid(page)))
-	    count_vm_event(HTMM_MISSED_DRAMREAD);
-	else
-	    count_vm_event(HTMM_MISSED_NVMREAD);
-    }
-    spin_unlock_irqrestore(&ds_queue->split_queue_lock, flags);
-    return true;
-}
+// 	if (node_is_toptier(page_to_nid(page)))
+// 	    count_vm_event(HTMM_MISSED_DRAMREAD);
+// 	else
+// 	    count_vm_event(HTMM_MISSED_NVMREAD);
+//     }
+//     spin_unlock_irqrestore(&ds_queue->split_queue_lock, flags);
+//     return true;
+// }
 
 void check_failed_list(struct mem_cgroup_per_node *pn,
 	struct list_head *tmp, struct list_head *failed_list)
 {
     while (!list_empty(tmp)) {
 		struct page *page = lru_to_page(tmp);
-		struct page *meta;
-		unsigned int idx;
+		// struct page *meta;
+		// unsigned int idx;
 
 		list_move(&page->lru, failed_list);
 		
@@ -184,16 +184,16 @@ void check_failed_list(struct mem_cgroup_per_node *pn,
 			}
 		}
 
-		meta = get_meta_page(page);
-		idx = meta->idx;
+		// meta = get_meta_page(page);
+		// idx = meta->idx;
     }
 }
 
-struct page *get_meta_page(struct page *page)
-{
-    page = compound_head(page);
-    return &page[3];
-}
+// struct page *get_meta_page(struct page *page)
+// {
+//     page = compound_head(page);
+//     return &page[3];
+// }
 
 unsigned int get_accesses_from_idx(unsigned int idx)
 {
@@ -228,29 +228,29 @@ unsigned int get_idx(unsigned long num)
     return cnt;
 }
 
-int get_skew_idx(unsigned long num)
-{
-    int cnt = 0;
-    unsigned long tmp;
+// int get_skew_idx(unsigned long num)
+// {
+//     int cnt = 0;
+//     unsigned long tmp;
     
-    /* 0, 1-3, 4-15, 16-63, 64-255, 256-1023, 1024-2047, 2048-3071, ... */
-    tmp = num;
-    if (tmp >= 1024) {
-	while (tmp > 1024 && cnt < 9) { // <16
-	    tmp -= 1024;
-	    cnt++;
-	}
-	cnt += 11;
-    }
-    else {
-	while (tmp) {
-	    tmp >>= 1; // >>2
-	    cnt++;
-	}
-    }
+//     /* 0, 1-3, 4-15, 16-63, 64-255, 256-1023, 1024-2047, 2048-3071, ... */
+//     tmp = num;
+//     if (tmp >= 1024) {
+// 	while (tmp > 1024 && cnt < 9) { // <16
+// 	    tmp -= 1024;
+// 	    cnt++;
+// 	}
+// 	cnt += 11;
+//     }
+//     else {
+// 	while (tmp) {
+// 	    tmp >>= 1; // >>2
+// 	    cnt++;
+// 	}
+//     }
 
-    return cnt;
-}
+//     return cnt;
+// }
 
 /* linux/mm.h */
 void free_pginfo_pte(struct page *pte)
@@ -285,21 +285,21 @@ void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg)
     idx = get_idx(pginfo->total_accesses);
 }
 
-void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg)
-{
-    unsigned int nr_pages = thp_nr_pages(page);
-    unsigned int idx;
+// void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg)
+// {
+//     unsigned int nr_pages = thp_nr_pages(page);
+//     unsigned int idx;
 
-    if (!memcg || !memcg->htmm_enabled)
-	return;
+//     if (!memcg || !memcg->htmm_enabled)
+// 	return;
     
-    page = compound_head(page);
-    if (nr_pages != 1) { // hugepage
-	    struct page *meta = get_meta_page(page);
+//     page = compound_head(page);
+    // if (nr_pages != 1) { // hugepage
+	//     struct page *meta = get_meta_page(page);
 
-	    idx = meta->idx;
-    }
-}
+	//     idx = meta->idx;
+    // }
+// }
 
 // void set_lru_adjusting(struct mem_cgroup *memcg, bool inc_thres)
 // {
@@ -318,29 +318,29 @@ void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg)
 //     }
 // }
 
-bool move_page_to_deferred_split_queue(struct mem_cgroup *memcg, struct page *page)
-{
-    struct lruvec *lruvec;
-    bool ret = false;
+// bool move_page_to_deferred_split_queue(struct mem_cgroup *memcg, struct page *page)
+// {
+//     struct lruvec *lruvec;
+//     bool ret = false;
 
-    page = compound_head(page);
+//     page = compound_head(page);
 
-    lruvec = mem_cgroup_page_lruvec(page);
-    spin_lock_irq(&lruvec->lru_lock);
+//     lruvec = mem_cgroup_page_lruvec(page);
+//     spin_lock_irq(&lruvec->lru_lock);
     
-    if (!PageLRU(page))
-	goto lru_unlock;
+//     if (!PageLRU(page))
+// 	goto lru_unlock;
 
-    if (deferred_split_huge_page_for_htmm(compound_head(page))) {
-	ret = true;
-	goto lru_unlock;
-    }
+//     if (deferred_split_huge_page_for_htmm(compound_head(page))) {
+// 	ret = true;
+// 	goto lru_unlock;
+//     }
     
-lru_unlock:
-    spin_unlock_irq(&lruvec->lru_lock);
+// lru_unlock:
+//     spin_unlock_irq(&lruvec->lru_lock);
 
-    return ret;
-}
+//     return ret;
+// }
 
 void move_page_to_active_lru(struct page *page)
 {
@@ -418,6 +418,6 @@ void update_stats(unsigned long long nr_bw, unsigned long long nr_cyc, unsigned 
 	//TODO:怎么得到我想要的cgroup,且重新定义cgroup的结构。不过也可以是内存共享的全局的东西
 	//先输出看看长什么样,空闲多少从迁移那边传吧？等等好像都不需要这个哩，咦~
 
-	printk(KERN_INFO "bw %llu cyc %llu ins %llu", nr_bw, nr_cyc, nr_ins);
+	// printk(KERN_INFO "bw %llu cyc %llu ins %llu", nr_bw, nr_cyc, nr_ins);
 	
 }

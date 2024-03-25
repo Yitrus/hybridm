@@ -7605,15 +7605,20 @@ static ssize_t action_write(struct kernfs_open_file *of,
 {
 	unsigned long train_action;
     int err;
+	int *ptr_action = &nr_action;
 	buf = strstrip(buf);
 	err = page_counter_memparse(buf, "train_action", &train_action);
     if (err){
 		printk("action write failed");
 		return err;
 	}
-	nr_action = (unsigned int)train_action;
 
-	printk("have been write %d", nr_action);
+	// printk("have been write train_action %d", (unsigned int)train_action);
+
+	*ptr_action = (unsigned int)train_action;
+	// printk("Value pointed by ptr_action: %d", *ptr_action);
+	
+	// printk("have been write nr_action %d", nr_action);
 
 	return nbytes;
 }
