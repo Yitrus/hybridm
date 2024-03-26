@@ -1362,9 +1362,9 @@ again:
 				    likely(!(vma->vm_flags & VM_SEQ_READ)))
 					mark_page_accessed(page);
 			}
-#ifdef CONFIG_HTMM
-			uncharge_htmm_pte(pte, get_mem_cgroup_from_mm(vma->vm_mm));
-#endif
+// #ifdef CONFIG_HTMM
+// 			uncharge_htmm_pte(pte, get_mem_cgroup_from_mm(vma->vm_mm));
+// #endif
 			rss[mm_counter(page)]--;
 			page_remove_rmap(page, false);
 			if (unlikely(page_mapcount(page) < 0))
@@ -3810,13 +3810,13 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		return handle_userfault(vmf, VM_UFFD_MISSING);
 	}
 #ifdef CONFIG_HTMM
-	do {
-	    struct mem_cgroup *memcg = get_mem_cgroup_from_mm(vma->vm_mm);
-	    if (!memcg) {
+	// do {
+	//     struct mem_cgroup *memcg = get_mem_cgroup_from_mm(vma->vm_mm);
+	//     if (!memcg) {
 			//为啥一定是没在cgroup里就要被取消active？
-			//ClearPageActive(page);
-	    }
-	} while (0);
+			// ClearPageActive(page);
+	//     }
+	// } while (0);
 	if (page != NULL && node_is_toptier(page_to_nid(page)))
 	    count_vm_event(HTMM_ALLOC_DRAM);
 	else

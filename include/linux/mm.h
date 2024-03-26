@@ -237,6 +237,7 @@ int __add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 #define PAGE_ALIGNED(addr)	IS_ALIGNED((unsigned long)(addr), PAGE_SIZE)
 
 #define lru_to_page(head) (list_entry((head)->prev, struct page, lru))
+#define lru_to_page_head(head) (list_entry((head)->next, struct page, lru))
 
 void setup_initial_init_mm(void *start_code, void *end_code,
 			   void *end_data, void *brk);

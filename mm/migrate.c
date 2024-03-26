@@ -1197,7 +1197,7 @@ out:
 	 * state.
 	 */
 	if (rc == MIGRATEPAGE_SUCCESS) {
-		if (unlikely(!is_lru))
+		if (unlikely(!is_lru)) //不是lru page的话
 			put_page(newpage);
 		else
 			putback_lru_page(newpage);

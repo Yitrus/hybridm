@@ -32,8 +32,17 @@
 			prefetchw(&prev->_field);			\
 		}                                                       \
 	} while (0)
+#define prefetchw_prev_lru_page_promotion(_page, _base, _field)                   \
+	do {                                                            \
+		if ((_page)->lru.next != _base) {                       \
+			struct page *next;				\
+			next = lru_to_page(&(_page->lru));		\
+			prefetchw(&next->_field);			\
+		}                                                       \
+	} while (0)
 #else
 #define prefetchw_prev_lru_page(_page, _base, _field) do { } while (0)
+#define prefetchw_prev_lru_page_promotion(_page, _base, _field) do { } while (0)
 #endif
 
 unsigned int nr_action;
@@ -270,6 +279,51 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
     return nr_taken;
 }
 
+static unsigned long isolate_lru_pages_promotion(unsigned long nr_to_scan,
+	struct lruvec *lruvec, enum lru_list lru, struct list_head *dst,
+	isolate_mode_t mode)
+{
+    struct list_head *src = &lruvec->lists[lru];
+    unsigned long nr_zone_taken[MAX_NR_ZONES] = { 0 };
+    unsigned long scan = 0, nr_taken = 0;
+    LIST_HEAD(busy_list);
+
+    while (scan < nr_to_scan && !list_empty(src)) {
+		struct page *page;
+		unsigned long nr_pages;
+
+		page = lru_to_page_head(src); //不应该从尾部摘除
+		prefetchw_prev_lru_page_promotion(page, src, flags);
+		VM_WARN_ON(!PageLRU(page));
+
+		nr_pages = compound_nr(page);
+		scan += nr_pages;
+
+		if (!__isolate_lru_page_prepare(page, 0)) {
+	    	list_move(&page->lru, src);
+			printk("isolate failed lru_page_prepare");
+	    	continue;
+		}
+		if (unlikely(!get_page_unless_zero(page))) {
+	    	list_move(&page->lru, src);
+			printk("isolate failed page_unless_zero");
+	    	continue;
+		}
+		if (!TestClearPageLRU(page)) {
+	    	put_page(page);
+	    	list_move(&page->lru, src);
+			printk("isolate failed TestClearPageLRU");
+	    	continue;
+		}
+
+		nr_taken += nr_pages;
+		nr_zone_taken[page_zonenum(page)] += nr_pages;
+		list_move(&page->lru, dst);
+    }
+
+    update_lru_sizes(lruvec, lru, nr_zone_taken);
+    return nr_taken;
+}
 
 static struct page *alloc_migrate_page(struct page *page, unsigned long node)
 {
@@ -289,14 +343,14 @@ static struct page *alloc_migrate_page(struct page *page, unsigned long node)
 	mask |= __GFP_HIGHMEM;
 
     if (thp_migration_supported() && PageTransHuge(page)) {
-	mask |= GFP_TRANSHUGE_LIGHT;
-	newpage = __alloc_pages_node(nid, mask, HPAGE_PMD_ORDER);
+		mask |= GFP_TRANSHUGE_LIGHT;
+		newpage = __alloc_pages_node(nid, mask, HPAGE_PMD_ORDER);
 
-	if (!newpage)
-	    return NULL;
+		if (!newpage)
+			return NULL;
 
-	prep_transhuge_page(newpage);
-	__prep_transhuge_page_for_htmm(NULL, newpage);
+		prep_transhuge_page(newpage);
+		__prep_transhuge_page_for_htmm(NULL, newpage);
     } else
 	newpage = __alloc_pages_node(nid, mask, 0);
 
@@ -317,7 +371,7 @@ static unsigned long migrate_page_list(struct list_head *migrate_list,
 		target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
 
     if (list_empty(migrate_list)){
-		//printk("migrate_page_list empty and over");
+		printk("migrate_page_list empty and over");
 		return 0;
 	}
 
@@ -369,20 +423,6 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 	    goto keep_locked;
 	if (!PageAnon(page) && nr_demotion_cand > nr_to_reclaim + HTMM_MIN_FREE_PAGES)
 	    goto keep_locked;
-// edit by 100, 不需要任何直方图的判断了
-	// if (htmm_nowarm == 0 && PageAnon(page)) {
-	    // if (PageTransHuge(page)) {
-		// struct page *meta = get_meta_page(page);
-
-		// if (meta->idx >= memcg->warm_threshold)
-		    // goto keep_locked;
-	    // } else {
-		// unsigned int idx = get_pginfo_idx(page);
-
-		// if (idx >= memcg->warm_threshold)
-		    // goto keep_locked;
-	    // }
-	// }
 
 	unlock_page(page);
 	list_add(&page->lru, &demote_pages);
@@ -419,29 +459,37 @@ static unsigned long promote_page_list(struct list_head *page_list,
 		list_del(&page->lru);
 	
 		if (!trylock_page(page)){
-			//printk("locked!");
+			printk("locked!");
 			goto __keep;
 		}
-		if (!PageActive(page) && htmm_mode != HTMM_NO_MIG)
-	    	goto __keep_locked;
-		if (unlikely(!page_evictable(page)))
-	    	goto __keep_locked;
-		if (PageWriteback(page))
-	    	goto __keep_locked;
+		//if (!PageActive(page) && htmm_mode != HTMM_NO_MIG)
+		if (htmm_mode == HTMM_NO_MIG){
+			printk("htmm no mig?!");
+			goto __keep_locked;
+		}
+		if (unlikely(!page_evictable(page))){
+			printk("page_evictable");
+			goto __keep_locked;
+		}
+		if (PageWriteback(page)){
+			printk("Writeback");
+			goto __keep_locked;
+		}
 		if (PageTransHuge(page) && !thp_migration_supported()){
 			printk("thp unsupport? %d", thp_migration_supported());
 			goto __keep_locked;
 		}
 	    	
 		//但是这个链表是空的？
-		printk("ready promote page");
+		SetPageActive(page);
+		//printk("ready promote page");
 		list_add(&page->lru, &promote_pages);
 		unlock_page(page);
 		continue;
 __keep_locked:
 		unlock_page(page);
 __keep:
-		//printk("ready promote page");
+		//printk("failed promote page");
 		//大部分页面加入这个链表了，都没办法迁移。
 		list_add(&page->lru, &ret_pages);
     }
@@ -499,12 +547,13 @@ static unsigned long promote_active_list(unsigned long nr_to_scan,
     lru_add_drain();
 
     spin_lock_irq(&lruvec->lru_lock);
-    nr_taken = isolate_lru_pages(nr_to_scan, lruvec, lru, &page_list, 0);
+    nr_taken = isolate_lru_pages_promotion(nr_to_scan, lruvec, lru, &page_list, 0);
+	//printk("nr of each time isolate %ld", nr_taken);
     __mod_node_page_state(pgdat, NR_ISOLATED_ANON, nr_taken);
     spin_unlock_irq(&lruvec->lru_lock);
 
     if (nr_taken == 0){
-		printk("nr of each time isolate %ld", nr_taken);
+		printk("nr of isolate be 0?！");
 		return 0;
 	}
 	
@@ -530,34 +579,34 @@ static unsigned long demote_lruvec(unsigned long nr_to_reclaim, short priority,
 
     /* we need to scan file lrus first */
     for_each_evictable_lru(tmp) {
-	lru = (tmp + 2) % 4;
+		lru = (tmp + 2) % 4; //从文件页开始驱逐
 
-	if (!shrink_active && !is_file_lru(lru) && is_active_lru(lru))
-	    continue;	
+		if (!shrink_active && !is_file_lru(lru) && is_active_lru(lru))
+	    	continue;	
 	
-	if (is_file_lru(lru)) {
-	    nr_to_scan = lruvec_lru_size(lruvec, lru, MAX_NR_ZONES);
-	} else {
-	    nr_to_scan = lruvec_lru_size(lruvec, lru, MAX_NR_ZONES) >> priority;
+		if (is_file_lru(lru)) {
+			nr_to_scan = lruvec_lru_size(lruvec, lru, MAX_NR_ZONES);
+		} else {
+			nr_to_scan = lruvec_lru_size(lruvec, lru, MAX_NR_ZONES) >> priority;
 
-	    if (nr_to_scan < nr_to_reclaim)
-		nr_to_scan = nr_to_reclaim * 11 / 10; // because warm pages are not demoted
-	}
+			if (nr_to_scan < nr_to_reclaim)
+			nr_to_scan = nr_to_reclaim * 11 / 10; // because warm pages are not demoted
+		}
 
-	if (!nr_to_scan)
-	    continue;
+		if (!nr_to_scan)
+			continue;
 
-	while (nr_to_scan > 0) {
-	    unsigned long scan = min(nr_to_scan, SWAP_CLUSTER_MAX);
-	    nr_reclaimed += demote_inactive_list(scan, scan,
-					     lruvec, lru, shrink_active);
-	    nr_to_scan -= (long)scan;
-	    if (nr_reclaimed >= nr_to_reclaim)
-		break;
-	}
+		while (nr_to_scan > 0) {
+			unsigned long scan = min(nr_to_scan, SWAP_CLUSTER_MAX);
+			nr_reclaimed += demote_inactive_list(scan, scan,
+							lruvec, lru, shrink_active);
+			nr_to_scan -= (long)scan;
+			if (nr_reclaimed >= nr_to_reclaim)
+			break;
+		}
 
-	if (nr_reclaimed >= nr_to_reclaim)
-	    break;
+		if (nr_reclaimed >= nr_to_reclaim)
+			break;
     }
 
     return nr_reclaimed;
@@ -577,7 +626,7 @@ static unsigned long promote_lruvec(unsigned long nr_to_promote, short priority,
 
 static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 	unsigned long nr_exceeded)
-{//edit by 100, 执行降级操作，但是要去掉和直方图、冷处理相关的方案
+{
     struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
     short priority = DEF_PRIORITY;
     unsigned long nr_to_reclaim = 0, nr_evictable_pages = 0, nr_reclaimed = 0;
@@ -627,17 +676,19 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 {
     struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
     unsigned long nr_to_promote, nr_promoted = 0; //向上迁移是不限量的，有就迁移,但是现在逻辑还是尽量迁移action的量
-    enum lru_list lru = LRU_ACTIVE_ANON;
+    enum lru_list lru = LRU_INACTIVE_ANON;
     short priority = DEF_PRIORITY;
 	//int target_nid = htmm_cxl_mode ? 0 : next_promotion_node(pgdat->node_id);
 
 	unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
+
+	nr_to_promote = (unsigned long)nr_action;
 		
-    nr_to_promote = min((unsigned long)nr_action, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
-	if(nr_to_promote == 0){
-		lru = LRU_INACTIVE_ANON;
-		nr_to_promote = min((unsigned long)nr_action, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
-	}
+    // nr_to_promote = min((unsigned long)nr_action, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
+	// if(nr_to_promote == 0){
+	// 	lru = LRU_INACTIVE_ANON;
+	// 	nr_to_promote = min((unsigned long)nr_action, lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
+	// }
 
 	// printk("___get the promoted %lu___", nr_to_promote);
 
@@ -654,6 +705,17 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 	    	break;
 		priority--;
     } while (priority);
+
+	// if(nr_promoted < nr_to_promote){
+	// 	priority = DEF_PRIORITY;
+	// 	lru = LRU_INACTIVE_ANON;
+	// 	do {
+	// 		nr_promoted += promote_lruvec(nr_to_promote, priority, pgdat, lruvec, lru);
+	// 		if (nr_promoted >= nr_to_promote)
+	//     		break;
+	// 		priority--;
+    // 	} while (priority);
+	// }
 
 	lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
 	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
@@ -700,7 +762,7 @@ static struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat)
 
 static int kmigraterd_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, unsigned long nr_demotion)
 {
-	// edit by 100, 这里做页面 降级 降级 降级 操作
+	// 先是调整了页面迁移的数量，在去实际做迁移操作
 	if (need_toptier_demotion(pgdat, memcg, &nr_demotion)) {
 	    demote_node(pgdat, memcg, nr_demotion);
     }
