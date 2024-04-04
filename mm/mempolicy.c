@@ -3030,7 +3030,7 @@ void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol)
 
 bool numa_demotion_enabled = false;
 #ifdef CONFIG_HTMM /* sysfs htmm */
-unsigned int htmm_sample_period = 199;
+unsigned int htmm_sample_period = 30000;
 unsigned int htmm_inst_sample_period = 100007;
 unsigned int htmm_thres_hot = 1;
 unsigned int htmm_cooling_period = 2000000;
@@ -3039,7 +3039,7 @@ unsigned int htmm_split_period = 2; /* used to shift the wss of memcg */
 unsigned int ksampled_min_sample_ratio = 50; // 50%
 unsigned int ksampled_max_sample_ratio = 10; // 10%
 unsigned int htmm_demotion_period_in_ms = 2000;
-unsigned int htmm_promotion_period_in_ms = 2000;
+unsigned int htmm_promotion_period_in_ms = 30000;
 unsigned int htmm_thres_split = 2; 
 unsigned int htmm_nowarm = 0; // enabled: 0, disabled: 1
 unsigned int htmm_util_weight = 10; // no impact (unused)

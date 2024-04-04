@@ -65,11 +65,12 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     attr.precise_ip = 1;
     attr.enable_on_exec = 1;
 
-    if (pid == 0)
+    if (pid == 0) //这个pid是htmm_start初始化的，那么采样应该是指定某个app的
 		__pid = -1;
     else
 		__pid = pid;
 	
+	// printk("--------------sampler pid %d-------------", __pid);
     event_fd = htmm__perf_event_open(&attr, __pid, cpu, -1, 0);
     if (event_fd <= 0) {
 		printk("[error htmm__perf_event_open failure] event_fd: %d\n", event_fd);
@@ -134,11 +135,9 @@ static void pebs_disable(void)
 unsigned long long nr_bw = 0, nr_cyc = 0, nr_ins = 0;
 static int ksamplingd(void *data)
 {
-	//edit by 100, 计算
     unsigned long long nr_throttled = 0, nr_lost = 0, nr_unknown = 0;
 	unsigned long sleep_timeout;
-	// sleep_timeout = usecs_to_jiffies(10000);
-	sleep_timeout = msecs_to_jiffies(10000); //毫秒和秒是1000
+	sleep_timeout = msecs_to_jiffies(30000); //毫秒和秒是1000
 	
     const struct cpumask *cpumask = cpumask_of_node(0);
     if (!cpumask_empty(cpumask))
