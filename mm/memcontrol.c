@@ -7641,38 +7641,13 @@ static int __init mem_cgroup_action_init(void)
 }
 subsys_initcall(mem_cgroup_action_init);
 
-static int stat_show(struct seq_file *m, void *v)
-{
-    struct seq_buf s;
-
-    seq_buf_init(&s, kmalloc(PAGE_SIZE, GFP_KERNEL), PAGE_SIZE);
-    if (!s.buffer)
-		return 0;
-
-    seq_buf_printf(&s, "bw %llu cyc %llu ins %llu\n", nr_bw, nr_cyc, nr_ins);
-
-    seq_puts(m, s.buffer);
-    kfree(s.buffer);
-    
-    return 0;
-}
-
-static struct cftype stat_file[] = {
-    {
-	.name = "stat_show",
-	.flags = CFTYPE_NOT_ON_ROOT,
-	.seq_show = stat_show,
-    },
-    {},
-};
-
-static int __init mem_cgroup_stat_init(void)
-{
-    WARN_ON(cgroup_add_dfl_cftypes(&memory_cgrp_subsys,
-		stat_file));
-    return 0;
-}
-subsys_initcall(mem_cgroup_stat_init);
+// static int __init mem_cgroup_stat_init(void)
+// {
+//     WARN_ON(cgroup_add_dfl_cftypes(&memory_cgrp_subsys,
+// 		stat_file));
+//     return 0;
+// }
+// subsys_initcall(mem_cgroup_stat_init);
 
 static int memcg_per_node_max_show(struct seq_file *m, void *v)
 {

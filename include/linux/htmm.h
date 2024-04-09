@@ -12,14 +12,13 @@
 
 
 /* pebs events */
-// edit by yxy, 需要重新定义要采样的事件
-#define DRAM_LLC_LOAD_MISS  0x1d3 //这个肯定会读DRAM也会被访问留下,但是内容为null
-#define REMOTE_DRAM_LLC_LOAD_MISS   0x2d3 /* unused */
-#define NVM_LLC_LOAD_MISS   0x80d1 /* unused */
-#define ALL_STORES	    0x82d0 //这个表示对于所有内存的写入，就还好；采样得到的内容为null
-#define ALL_LOADS	    0x81d0 /* unused */
-#define STLB_MISS_STORES    0x12d0 /* unused */
-#define STLB_MISS_LOADS	    0x11d0 /* unused */
+#define DRAM_LLC_LOAD_MISS  0x1d3
+#define REMOTE_DRAM_LLC_LOAD_MISS   0x2d3
+#define NVM_LLC_LOAD_MISS   0x80d1
+#define ALL_STORES	    0x82d0
+#define ALL_LOADS	    0x81d0
+#define STLB_MISS_STORES    0x12d0
+#define STLB_MISS_LOADS	    0x11d0
 
 /* tmm option */
 #define HTMM_NO_MIG	    0x0	/* unused */
@@ -81,15 +80,17 @@ static const unsigned int pebs_inst_period_list[pinstcount] ={
 struct htmm_event {
     struct perf_event_header header;
     __u64 ip;
-    //__u32 pid, tid;
-    //__u64 addr;
+    __u32 pid, tid;
+    __u64 addr;
 };
 
 enum events {
-    DRAMREAD = 0, // 那我就用他自己的自定义事件来表示带宽的情况吧
-    MEMWRITE = 1,
-	CPU_CYCLES = 2, // edit by 100, 这是采样时钟周期的，总的周期/采样间隔
-	INSTRUCTIONS = 3, //浮点数计算数，不过又不是HPC应用所以好像不太适用，不过那啥ML的算法也是这样
+    DRAMREAD = 0,
+    NVMREAD = 1,
+    MEMWRITE = 2,
+    TLB_MISS_LOADS = 3,
+    TLB_MISS_STORES = 4,
+    CXLREAD = 5, // emulated by remote DRAM node
     N_HTMMEVENTS
 };
 
@@ -104,7 +105,9 @@ extern void copy_transhuge_pginfo(struct page *page,
 				  struct page *newpage);
 extern pginfo_t *get_compound_pginfo(struct page *page, unsigned long address);
 
-extern void update_stats(unsigned long long bw, unsigned long long cyc, unsigned long long ins);
+extern void set_lru_adjusting(struct mem_cgroup *memcg, bool inc_thres);
+
+extern void update_pginfo(pid_t pid, unsigned long address, enum events e);
 
 extern void move_page_to_active_lru(struct page *page);
 extern void move_page_to_inactive_lru(struct page *page);
@@ -116,12 +119,10 @@ extern void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg);
 extern void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 extern void charge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 
-/* htmm_sampler.c */
-extern unsigned long long nr_bw, nr_cyc, nr_ins;
-
 extern int ksamplingd_init(pid_t pid, int node);
 extern void ksamplingd_exit(void);
 
+extern void adjust_active_threshold(pid_t pid);
 
 /* htmm_migrater.c */
 #define HTMM_MIN_FREE_PAGES 256 * 10 // 10MB
