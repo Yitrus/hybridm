@@ -147,12 +147,14 @@ static void pebs_disable(void)
     }
 }
 
+unsigned int hit_ratio;
 static int ksamplingd(void *data)
 {
 	//不太清楚具体作用，先放这里
 	unsigned long long nr_sampled = 0, nr_dram = 0, nr_nvm = 0, nr_write = 0;
-    unsigned long long nr_throttled = 0, nr_lost = 0, nr_unknown = 0;
-    unsigned long long nr_skip = 0;
+	hit_ratio = 0;
+    unsigned long long nr_lost = 0, nr_throttled = 0, nr_unknown = 0;
+    // unsigned long long nr_skip = 0, ;
 	 /* for analytic purpose */
     unsigned long hr_dram = 0, hr_nvm = 0;
 
@@ -262,11 +264,19 @@ static int ksamplingd(void *data)
 			    			nr_unknown++;
 			    			break;
 		    		}
-		    		if (nr_sampled % 500000 == 0) {
+					if(nr_dram == 0){
+						hit_ratio = 0;
+					}else if(nr_nvm == 0){
+						hit_ratio = 100;
+					}else{
+						hit_ratio = nr_dram*100 / nr_nvm;
+					}
+		    		// if (nr_sampled % 500000 == 0) {
 						nr_dram = 0;
 						nr_nvm = 0;
 						nr_write = 0;
-		    		}
+		    		// }
+
 		    		/* read, write barrier */
 		    		smp_mb();
 		    		WRITE_ONCE(up->data_tail, up->data_tail + ph->size);

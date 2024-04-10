@@ -121,8 +121,7 @@ extern void charge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 
 extern int ksamplingd_init(pid_t pid, int node);
 extern void ksamplingd_exit(void);
-
-extern void adjust_active_threshold(pid_t pid);
+extern unsigned int hit_ratio;
 
 /* htmm_migrater.c */
 #define HTMM_MIN_FREE_PAGES 256 * 10 // 10MB

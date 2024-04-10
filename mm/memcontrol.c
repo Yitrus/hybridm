@@ -7593,6 +7593,12 @@ static int __init mem_cgroup_htmm_init(void)
 }
 subsys_initcall(mem_cgroup_htmm_init);
 
+static int hit_ratio_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%d\n", hit_ratio);
+    return 0;
+}
+
 static int action_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "%d\n", nr_action);
@@ -7623,6 +7629,15 @@ static ssize_t action_write(struct kernfs_open_file *of,
 	return nbytes;
 }
 
+static struct cftype hit_ratio_file[] = {
+    {
+	.name = "hit_ratio_show",
+	.flags = CFTYPE_NOT_ON_ROOT,
+	.seq_show = hit_ratio_show,
+    },
+    {},
+};
+
 static struct cftype action_file[] = {
     {
 	.name = "action_show",
@@ -7641,13 +7656,13 @@ static int __init mem_cgroup_action_init(void)
 }
 subsys_initcall(mem_cgroup_action_init);
 
-// static int __init mem_cgroup_stat_init(void)
-// {
-//     WARN_ON(cgroup_add_dfl_cftypes(&memory_cgrp_subsys,
-// 		stat_file));
-//     return 0;
-// }
-// subsys_initcall(mem_cgroup_stat_init);
+static int __init mem_cgroup_hit_ratio_init(void)
+{
+    WARN_ON(cgroup_add_dfl_cftypes(&memory_cgrp_subsys,
+		hit_ratio_file));
+    return 0;
+}
+subsys_initcall(mem_cgroup_hit_ratio_init);
 
 static int memcg_per_node_max_show(struct seq_file *m, void *v)
 {
