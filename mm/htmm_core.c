@@ -319,9 +319,6 @@ lru_unlock:
 	BUG();
 }
 
-unsigned long hit_dram;
-unsigned long hit_pm;
-unsigned long hit_other;
 static void update_base_page(struct vm_area_struct *vma,
 	struct page *page, pginfo_t *pginfo)
 {
