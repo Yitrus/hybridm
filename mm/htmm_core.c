@@ -232,18 +232,18 @@ void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg)
 
 void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg)
 {
-    unsigned int nr_pages = thp_nr_pages(page);
+    // unsigned int nr_pages = thp_nr_pages(page);
     // unsigned int idx;
 
     if (!memcg || !memcg->htmm_enabled)
 	return;
     
     page = compound_head(page);
-    if (nr_pages != 1) { // hugepage
-	    struct page *meta = get_meta_page(page);
+    // if (nr_pages != 1) { // hugepage
+	//     struct page *meta = get_meta_page(page);
 
 	    // idx = meta->idx;
-    }
+    // }
 }
 
 // 这个是什么时候用起来的，在update—basic和huge page时
@@ -319,13 +319,16 @@ lru_unlock:
 	BUG();
 }
 
-
+unsigned long hit_dram;
+unsigned long hit_pm;
+unsigned long hit_other;
 static void update_base_page(struct vm_area_struct *vma,
 	struct page *page, pginfo_t *pginfo)
 {
-    struct mem_cgroup *memcg = get_mem_cgroup_from_mm(vma->vm_mm);
-    unsigned long prev_accessed, prev_idx, cur_idx;
+    // struct mem_cgroup *memcg = get_mem_cgroup_from_mm(vma->vm_mm);
+    unsigned long prev_accessed, prev_idx, cur_idx, tmp_addr;
     bool hot;
+
 
     prev_accessed = pginfo->total_accesses; //以前被访问的次数？
     pginfo->nr_accesses++; //这次被访问的次数累计
@@ -346,7 +349,7 @@ static void update_base_page(struct vm_area_struct *vma,
     // spin_unlock(&memcg->access_lock);
     
     // 在这一步在lru两个部分之间移动hot = cur_idx >= memcg->active_threshold;
-    if(cur_idx >= 12){ //小页面元数据*512，
+    if(cur_idx >= 10){ //小页面元数据*512，12
         hot = true;
     }else{
         hot = false;
@@ -360,17 +363,26 @@ static void update_base_page(struct vm_area_struct *vma,
 	    move_page_to_active_lru(page);
     else if (PageActive(page))
 	    move_page_to_inactive_lru(page);
+
+    tmp_addr = page_to_phys(page);
+    if(tmp_addr <= DRAM_ADDR_END){
+        hit_dram += 1;
+    }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
+        hit_pm += 1;
+    }else{
+        hit_other += 1;
+    }
 }
 // 前后这两个针对base和huge的页面是这次要改要做调整的主要函数
 static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
 	struct page *page, unsigned long address)
 {
-    struct mem_cgroup *memcg = get_mem_cgroup_from_mm(vma->vm_mm);
+    // struct mem_cgroup *memcg = get_mem_cgroup_from_mm(vma->vm_mm);
     struct page *meta_page;
     pginfo_t *pginfo;
     unsigned long prev_idx, cur_idx;
     bool hot, pg_split = false;
-    unsigned long pginfo_prev;
+    unsigned long pginfo_prev, tmp_addr;
 
     meta_page = get_meta_page(page); //大页的访问信息记录主要就靠这个结构体
     pginfo = get_compound_pginfo(page, address);
@@ -399,7 +411,7 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
 	return;
 
     // hot = cur_idx >= memcg->active_threshold;
-    if(cur_idx >= 8){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
+    if(cur_idx >= 5){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
        hot = true;
     }else{
         hot = false;
@@ -415,6 +427,15 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
 	    move_page_to_active_lru(page);
     else if (PageActive(page))
 	    move_page_to_inactive_lru(page);
+
+    tmp_addr = page_to_phys(page);
+    if(tmp_addr <= DRAM_ADDR_END){
+        hit_dram += 1;
+    }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
+        hit_pm += 1;
+    }else{
+        hit_other += 1;
+    }
 }
 
 static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,

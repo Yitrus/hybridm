@@ -10,6 +10,10 @@
 #define CPUS_PER_SOCKET 24
 #define MAX_MIGRATION_RATE_IN_MBPS  2048 /* 2048MB per sec */
 
+/* 定义判断地址的常量 16进制*/
+#define DRAM_ADDR_END 0x207fffffff
+#define PM_ADDR_START 0x2100000000
+#define PM_ADDR_END 0x9e7fffffff
 
 /* pebs events */
 #define DRAM_LLC_LOAD_MISS  0x1d3
@@ -85,12 +89,13 @@ struct htmm_event {
 };
 
 enum events {
-    DRAMREAD = 0,
-    NVMREAD = 1,
-    MEMWRITE = 2,
-    TLB_MISS_LOADS = 3,
-    TLB_MISS_STORES = 4,
-    CXLREAD = 5, // emulated by remote DRAM node
+    LLC_MISS = 0,
+    // DRAMREAD = 0,
+    // NVMREAD = 1,
+    // MEMWRITE = 2,
+    // TLB_MISS_LOADS = 3,
+    // TLB_MISS_STORES = 4,
+    // CXLREAD = 5, // emulated by remote DRAM node
     N_HTMMEVENTS
 };
 
@@ -122,6 +127,9 @@ extern void charge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 extern int ksamplingd_init(pid_t pid, int node);
 extern void ksamplingd_exit(void);
 extern unsigned int hit_ratio;
+extern unsigned long hit_dram;
+extern unsigned long hit_pm;
+extern unsigned long hit_other;
 
 /* htmm_migrater.c */
 #define HTMM_MIN_FREE_PAGES 256 * 10 // 10MB

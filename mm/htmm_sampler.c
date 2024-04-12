@@ -25,24 +25,12 @@ static bool valid_va(unsigned long addr)
 }
 
 static __u64 get_pebs_event(enum events e)
-{
+{ //主要是这些peb事件还不能理解
     switch (e) { 
-	case DRAMREAD:
-	    return DRAM_LLC_LOAD_MISS;
-	case NVMREAD:
-	    if (!htmm_cxl_mode)
-		return NVM_LLC_LOAD_MISS;
-	    else
-		return N_HTMMEVENTS;
-	case MEMWRITE:
-	    return ALL_STORES;
-	case CXLREAD:
-	    if (htmm_cxl_mode)
-		return REMOTE_DRAM_LLC_LOAD_MISS;
-	    else
-		return N_HTMMEVENTS;
+	case LLC_MISS:
+		return PERF_COUNT_HW_CACHE_MISSES;
 	default:
-	    return N_HTMMEVENTS;
+	    return PERF_COUNT_HW_CACHE_MISSES;
     }
 }
 
@@ -55,7 +43,8 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
 
     memset(&attr, 0, sizeof(struct perf_event_attr));
 
-	attr.type = PERF_TYPE_RAW;
+	// attr.type = PERF_TYPE_RAW;
+	attr.type = PERF_TYPE_HARDWARE;
 
     attr.size = sizeof(struct perf_event_attr);
     attr.config = config; //要监测的采样事件
@@ -107,7 +96,7 @@ static int pebs_init(pid_t pid, int node)
 			mem_event[cpu][event] = NULL;
 			continue;
 	    }
-
+		mem_event[cpu] = NULL;
 	    if (__perf_event_open(get_pebs_event(event), 0, cpu, event, pid)){
 			printk("pebs_init __perf_event_open failed %d event", event);
 			return -1;
@@ -122,19 +111,6 @@ static int pebs_init(pid_t pid, int node)
     return 0;
 }
 
-static void pebs_enable(void)
-{
-    int cpu, event;
-
-    printk("pebs enable\n");
-    for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
-	for (event = 0; event < N_HTMMEVENTS; event++) {
-	    if (mem_event[cpu][event])
-		perf_event_enable(mem_event[cpu][event]);
-	}
-    }
-}
-
 static void pebs_disable(void)
 {
     int cpu, event;
@@ -145,25 +121,25 @@ static void pebs_disable(void)
 			perf_event_disable(mem_event[cpu][event]);
 	}
     }
+	printk("-----------pebs disable-----------");
 }
 
-unsigned int hit_ratio;
+unsigned int hit_ratio = 0;
+unsigned long hit_dram;
+unsigned long hit_pm;
+unsigned long hit_other;
 static int ksamplingd(void *data)
 {
-	//不太清楚具体作用，先放这里
-	unsigned long long nr_sampled = 0, nr_dram = 0, nr_nvm = 0, nr_write = 0;
-	hit_ratio = 0;
-    unsigned long long nr_lost = 0, nr_throttled = 0, nr_unknown = 0;
-    // unsigned long long nr_skip = 0, ;
-	 /* for analytic purpose */
-    unsigned long hr_dram = 0, hr_nvm = 0;
-
 	unsigned long sleep_timeout;
-	sleep_timeout = msecs_to_jiffies(30000); //毫秒和秒是1000
+
+	hit_dram = 0;
+	hit_pm = 0;
+	hit_other = 0;
+	sleep_timeout = msecs_to_jiffies(25000); //毫秒和秒是1000
 	
-    const struct cpumask *cpumask = cpumask_of_node(0);
-    if (!cpumask_empty(cpumask))
-		do_set_cpus_allowed(access_sampling, cpumask);
+    // const struct cpumask *cpumask = cpumask_of_node(0);
+    // if (!cpumask_empty(cpumask))
+	// 	do_set_cpus_allowed(access_sampling, cpumask);
 
     while (!kthread_should_stop()) {
 		int cpu, event, cond = false;
@@ -240,53 +216,32 @@ static int ksamplingd(void *data)
 			    			}
 
 							update_pginfo(he->pid, he->addr, event);
-			    			nr_sampled++;
-
-							if (event == DRAMREAD) {
-								nr_dram++;
-								hr_dram++;
-			    			}
-			    			else if (event == CXLREAD || event == NVMREAD) {
-								nr_nvm++;
-								hr_nvm++;
-			    			}
-			    			else
-								nr_write++;
+			    			
 			    			break;
 						case PERF_RECORD_THROTTLE:
 						case PERF_RECORD_UNTHROTTLE:
-			    			nr_throttled++;
-			    			break;
 						case PERF_RECORD_LOST_SAMPLES:
-			    			nr_lost ++;
-			    			break;
 						default:
-			    			nr_unknown++;
 			    			break;
 		    		}
-					if(nr_dram == 0){
-						hit_ratio = 0;
-					}else if(nr_nvm == 0){
-						hit_ratio = 100;
-					}else{
-						hit_ratio = nr_dram*100 / nr_nvm;
-					}
-		    		// if (nr_sampled % 500000 == 0) {
-						nr_dram = 0;
-						nr_nvm = 0;
-						nr_write = 0;
-		    		// }
-
 		    		/* read, write barrier */
 		    		smp_mb();
 		    		WRITE_ONCE(up->data_tail, up->data_tail + ph->size);
 				} while (cond);
 	    	}
 		}	
-	
+
+		if(hit_dram == 0){
+			hit_ratio = 0;
+		}else if(hit_pm == 0){
+			hit_ratio = 100;
+		}else{
+			hit_ratio = (hit_dram*100 / (hit_dram + hit_pm));
+		}
+		
 		/* if ksampled_soft_cpu_quota is zero, disable dynamic pebs feature */
-		if (!ksampled_soft_cpu_quota)
-			continue;
+		// if (!ksampled_soft_cpu_quota)
+		// 	continue;
 
 		/* sleep 这确实是while中线程需要循环做的事情，
 		然后每次执行后需要休眠如果原本的定义不行可以采用msleep_interruptible(2000);*/
@@ -305,6 +260,8 @@ static int ksamplingd_run(void)
 		if (IS_ERR(access_sampling)) {
 	    	err = PTR_ERR(access_sampling);
 	    	access_sampling = NULL;
+		}else{
+			printk("------------ksamplingd run normally------------");
 		}
     }
     return err;
@@ -330,6 +287,7 @@ void ksamplingd_exit(void)
 {
     if (access_sampling) { //初始化时为NULL
 		kthread_stop(access_sampling);
+		printk("------------ksamplingd exit normally------------");
 		access_sampling = NULL;
     }
     pebs_disable();

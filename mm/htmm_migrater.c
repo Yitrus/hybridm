@@ -78,10 +78,10 @@ void del_memcg_from_kmigraterd(struct mem_cgroup *memcg, int nid)
 
     spin_lock(&pgdat->kmigraterd_lock);
     list_for_each_entry(mz, &pgdat->kmigraterd_head, kmigraterd_list) {
-	if (mz == pn) {
-	    list_del(&pn->kmigraterd_list);
-	    break;
-	}
+		if (mz == pn) {
+			list_del(&pn->kmigraterd_list);
+			break;
+		}
     }
     spin_unlock(&pgdat->kmigraterd_lock);
 }
@@ -125,7 +125,8 @@ unsigned long get_nr_lru_pages_node(struct mem_cgroup *memcg, pg_data_t *pgdat)
     return nr_pages;
 }
 
-static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
+// 这个函数返回的下层active数目
+static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgroup *memcg, unsigned int *nr_action)
 {
     struct lruvec *lruvec;
     unsigned long lruvec_size;
@@ -143,9 +144,12 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
 		return 0;
 	}
 
+	if(lruvec_size < (unsigned long)(*nr_action)){
+		*nr_action = (unsigned int)lruvec_size;
+	}
+
     return lruvec_size;
 }
-
 
 static bool need_toptier_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, unsigned long *nr_exceeded)
 {
@@ -166,7 +170,7 @@ static bool need_toptier_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, un
 	return true;
 }
 
-// 这个函数用于反映DRAM层还剩下多少空间
+// 这个函数用于反映DRAM层还剩下多少空间。
 static bool promotion_available(int target_nid, struct mem_cgroup *memcg,
 	unsigned long *nr_to_promote)
 {
@@ -605,7 +609,7 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
     enum lru_list lru;
     bool shrink_active = false;
 
-	unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
+	// unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
 
     for_each_evictable_lru(lru) {
 		if (!is_file_lru(lru) && is_active_lru(lru))
@@ -619,11 +623,11 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
     if (nr_exceeded > nr_evictable_pages)
 		shrink_active = true;
 
-    lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
-	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
-	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
-	printk("BEFORE the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+    // lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	// lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	// file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	// file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	// printk("BEFORE the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 
     do {
 		nr_reclaimed += demote_lruvec(nr_to_reclaim - nr_reclaimed, priority,
@@ -633,11 +637,11 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 		priority--;
     } while (priority);
 
-	lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
-	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
-	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
-	printk("AFTER the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+	// lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	// lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	// file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	// file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	// printk("AFTER the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 
     return nr_reclaimed;
 }
@@ -649,15 +653,15 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
     enum lru_list lru = LRU_ACTIVE_ANON;
     short priority = DEF_PRIORITY;
 
-	unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
+	// unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
 
 	nr_to_promote = (unsigned long)nr_action;
 
-	lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
-	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
-	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
-	printk("PM NODE BEFORE the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+	// lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	// lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	// file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	// file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	// printk("PM NODE BEFORE the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 
     do {
 		nr_promoted += promote_lruvec(nr_to_promote, priority, pgdat, lruvec, lru);
@@ -677,11 +681,11 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
     	} while (priority);
 	}
 
-	lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
-	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
-	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
-	printk("PM NODE AFTER the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+	// lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	// lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	// file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	// file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	// printk("PM NODE AFTER the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 
     return nr_promoted;
 }
@@ -704,7 +708,8 @@ static struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat)
 
 static int kmigraterd_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, unsigned long nr_demotion)
 {
-	// 先是调整了页面迁移的数量，在去实际做迁移操作
+	// 先是调整了页面迁移的数量，再去实际做迁移操作
+	// 这里的逻辑还要考虑率下层active 0 就不做这个操作了
 	if (need_toptier_demotion(pgdat, memcg, &nr_demotion)) {
 	    demote_node(pgdat, memcg, nr_demotion);
     }
@@ -714,10 +719,10 @@ static int kmigraterd_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, unsig
 static int kmigraterd_promotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
 {
    // edit by 100, 这里做页面 升级 升级 升级 操作，promotes hot pages to fast memory node
-	if (need_lowertier_promotion(pgdat, memcg)) {
+	//if (need_lowertier_promotion(pgdat, memcg)) {
 		// printk("will do promote_node");
 	    // promote_node(pgdat, memcg);
-	}
+	//}
 	// TODO:是不是active lru==0有能迁移？
 	promote_node(pgdat, memcg);
 
@@ -761,15 +766,6 @@ static int kmigraterd(void *p)
 	        spin_unlock(&pgdat->kmigraterd_lock);
 	        continue;
 	    }
-	
-		get_best_action(&nr_action);
-		if(nr_action >0 && nr_action <= INT_MAX){ //如果有行动的话
-			//可能存在最初空闲太多的情况，但是这个判断一直不太正确
-			//nr_demotion = (unsigned long)nr_action - nr_available; 
-			if(!promotion_available(nid, memcg, &nr_available)){ //true表示还有空余页面
-				kmigraterd_demotion(pgdat, memcg, nr_action);
-			}
-		}
 
 		// ---------------------对于升级的操作---------------------------------
 		pn2 = next_memcg_cand(pgdat2); 
@@ -786,7 +782,17 @@ static int kmigraterd(void *p)
 	        spin_unlock(&pgdat2->kmigraterd_lock);
 	        continue;
 	    }
-		
+	
+		get_best_action(&nr_action);
+		need_lowertier_promotion(pgdat2, memcg2, &nr_action); 
+		if(nr_action >0 && nr_action <= INT_MAX){ //如果有行动的话
+			//可能存在最初空闲太多的情况，但是这个判断一直不太正确,所以实际操作传入的还是nr_action,nr_available没怎么用
+			//nr_demotion = (unsigned long)nr_action - nr_available; 
+			if(!promotion_available(nid, memcg, &nr_available)){ //true表示还有空余页面
+				kmigraterd_demotion(pgdat, memcg, nr_action);
+			}
+		}
+
 		if(nr_action >0 && nr_action <= INT_MAX){
 			kmigraterd_promotion(pgdat2, memcg2);
 		}
@@ -819,7 +825,6 @@ static void kmigraterd_run(int nid)
 	}
 		
     init_waitqueue_head(&pgdat->kmigraterd_wait);
-	//init_waitqueue_head(&pgdat2->kmigraterd_wait);一个节点去做就好了
 
     pgdat->kmigraterd = kthread_run(kmigraterd, pgdat, "kmigraterd%d", nid);
 	pgdat2->kmigraterd = pgdat->kmigraterd;
@@ -833,6 +838,8 @@ static void kmigraterd_run(int nid)
 		pr_err("Fails to start kmigraterd on node 2");
 		pgdat2->kmigraterd = NULL;
     }
+
+	printk("----------------kmigraterd run normally----------------");
 }
 
 // 这里启动和结束只考虑1个节点
@@ -845,8 +852,9 @@ void kmigraterd_stop(void)
 
 		if (km) {
 	    	kthread_stop(km);
+			printk("----------------kmigraterd stop normally----------------");
 	    	NODE_DATA(nid)->kmigraterd = NULL;
-			NODE_DATA(2)->kmigraterd = NULL;
+			NODE_DATA(2)->kmigraterd = NULL; 
 		}
     //}
 }
