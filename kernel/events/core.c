@@ -12515,6 +12515,7 @@ SYSCALL_DEFINE1(htmm_end,
 SYSCALL_DEFINE2(htmm_start,
 		pid_t, pid, int, node)
 {
+	printk("in system call ksamplingd init");
     ksamplingd_init(pid, node);
     return 0;
 }

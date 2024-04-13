@@ -96,7 +96,7 @@ static int pebs_init(pid_t pid, int node)
 			mem_event[cpu][event] = NULL;
 			continue;
 	    }
-		mem_event[cpu] = NULL;
+		
 	    if (__perf_event_open(get_pebs_event(event), 0, cpu, event, pid)){
 			printk("pebs_init __perf_event_open failed %d event", event);
 			return -1;
@@ -271,8 +271,13 @@ int ksamplingd_init(pid_t pid, int node)
 { 
     int ret;
 
-    if (access_sampling)
-		return 0;
+    if (access_sampling){
+		// 初始化时还有，不是原来的return 0，而是把之前那个关掉
+		kthread_stop(access_sampling);
+		access_sampling = NULL;
+		pebs_disable();
+		printk("last time ksamplingd exit normally");
+	}
 
     ret = pebs_init(pid, node); //采样线程从这里就在报错了，应该就是core按照server定义的，多了
     if (ret) {
@@ -280,6 +285,7 @@ int ksamplingd_init(pid_t pid, int node)
 		return 0;
     }
 
+	printk("peb init ok then run ksamplingd");
     return ksamplingd_run();
 }
 
