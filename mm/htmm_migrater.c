@@ -789,6 +789,7 @@ static int kmigraterd(void *p)
 	
 		get_best_action(&nr_action);
 		need_lowertier_promotion(pgdat2, memcg2, &nr_action); 
+		printk("nr_action %d", nr_action);
 		if(nr_action >0 && nr_action <= INT_MAX){ //如果有行动的话
 			//可能存在最初空闲太多的情况，但是这个判断一直不太正确,所以实际操作传入的还是nr_action,nr_available没怎么用
 			//nr_demotion = (unsigned long)nr_action - nr_available; 

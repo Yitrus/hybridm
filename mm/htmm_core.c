@@ -349,8 +349,10 @@ static void update_base_page(struct vm_area_struct *vma,
         hot = false;
     }
     
-    if (hot)
-	    move_page_to_active_lru(page);
+    if (hot){
+        pginfo->total_accesses = pginfo->total_accesses >> 1;
+        move_page_to_active_lru(page);
+    }
     else if (PageActive(page))
 	    move_page_to_inactive_lru(page);
 }
@@ -368,6 +370,7 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
     meta_page = get_meta_page(page); //大页的访问信息记录主要就靠这个结构体
     pginfo = get_compound_pginfo(page, address);
 
+    //这一段是针对这个小页面在赋值（好吧有可能其他原因被拆分）
     pginfo_prev = pginfo->total_accesses;
     pginfo->nr_accesses++;
     pginfo->total_accesses += HPAGE_PMD_NR;
@@ -376,7 +379,7 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
 
 #ifndef DEFERRED_SPLIT_ISOLATED
     if (check_split_huge_page(memcg, meta_page, false)) {
-	pg_split = move_page_to_deferred_split_queue(memcg, page);
+	    pg_split = move_page_to_deferred_split_queue(memcg, page);
     }
 #endif
 
@@ -404,8 +407,11 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
 	//     move_page_to_active_lru(page);
     // }
     
-    if (hot)
-	    move_page_to_active_lru(page);
+    if (hot){
+         meta_page->total_accesses = meta_page->total_accesses >> 2;
+         meta_page->idx -= 1; 
+         move_page_to_active_lru(page);
+    }
     else if (PageActive(page))
 	    move_page_to_inactive_lru(page);
 }

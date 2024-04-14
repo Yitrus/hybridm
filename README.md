@@ -1,9 +1,6 @@
 # TODO:
-16. 两个page相关参数指导lru内部的位置调整PM不起作用
-17. 采样对于PM也不太准确
 18. 再次启动时内核崩溃
-19. 调整内部移动的参数更新和阈值
-
+20. 命中率准确度两边不一样？
 
 # Problem：
 
@@ -66,23 +63,3 @@ mbw测试了MEMCPY、DUMB、MCBLOCK等方式的内存带宽。从测试结果看
 
 ### python算内存带宽
 https://www.volcengine.com/theme/7266637-B-7-1
-
-
-Linux kernel
-============
-
-There are several guides for kernel developers and users. These guides can
-be rendered in a number of formats, like HTML and PDF. Please read
-Documentation/admin-guide/README.rst first.
-
-In order to build the documentation, use ``make htmldocs`` or
-``make pdfdocs``.  The formatted documentation can also be read online at:
-
-    https://www.kernel.org/doc/html/latest/
-
-There are various text files in the Documentation/ subdirectory,
-several of them using the Restructured Text markup notation.
-
-Please read the Documentation/process/changes.rst file, as it contains the
-requirements for building and running the kernel, and information about
-the problems which may result by upgrading your kernel.

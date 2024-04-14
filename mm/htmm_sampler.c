@@ -142,9 +142,6 @@ static int ksamplingd(void *data)
 {
 	unsigned long sleep_timeout;
 
-	hit_dram = 0;
-	hit_pm = 0;
-	hit_other = 0;
 	sleep_timeout = msecs_to_jiffies(25000); //毫秒和秒是1000
 	
     // const struct cpumask *cpumask = cpumask_of_node(0);
@@ -153,9 +150,12 @@ static int ksamplingd(void *data)
 
     while (!kthread_should_stop()) {
 		int cpu, event, cond = false;
+		hit_dram = 0;
+		hit_pm = 0;
+		hit_other = 0;
     
 		if (htmm_mode == HTMM_NO_MIG) {
-			msleep_interruptible(100000);
+			msleep_interruptible(10000);
 			continue;
 		}
 	
