@@ -753,7 +753,7 @@ static int kmigraterd(void *p)
 		struct mem_cgroup_per_node *pn2;
 		struct mem_cgroup *memcg2;
 
-	    if (kthread_should_stop()){ // 还不清楚这是干啥，先保留下来
+	    if (kthread_should_stop()){ 
 	        break;
 		}
 
@@ -763,7 +763,6 @@ static int kmigraterd(void *p)
 	        	continue;
 	    }
 
-		// ---------------------对于降级的操作---------------------------------
 	    memcg = pn->memcg;
 	    if (!memcg || !memcg->htmm_enabled) {
 	        spin_lock(&pgdat->kmigraterd_lock);
@@ -773,7 +772,6 @@ static int kmigraterd(void *p)
 	        continue;
 	    }
 
-		// ---------------------对于升级的操作---------------------------------
 		pn2 = next_memcg_cand(pgdat2); 
 		if (!pn2) { // 如果没有内存控制组就睡眠2s
 	        	msleep_interruptible(2000);

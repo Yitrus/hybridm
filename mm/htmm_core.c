@@ -255,18 +255,24 @@ void move_page_to_active_lru(struct page *page)
     lruvec = mem_cgroup_page_lruvec(page);
     
     spin_lock_irq(&lruvec->lru_lock);
-    if (PageActive(page))
-	goto lru_unlock;
+    if (PageActive(page)){
+        goto lru_unlock;
+    }
 
-    if (!__isolate_lru_page_prepare(page, 0))
-	goto lru_unlock;
+    if (!__isolate_lru_page_prepare(page, 0)){
+        printk("isolate_lru_page_prepare");
+        goto lru_unlock;
+    }
 
-    if (unlikely(!get_page_unless_zero(page)))
-	goto lru_unlock;
-
+    if (unlikely(!get_page_unless_zero(page))){
+        printk("get_page_unless_zero");
+        goto lru_unlock;
+    }
+	    
     if (!TestClearPageLRU(page)) {
-	put_page(page);
-	goto lru_unlock;
+        printk("TestClearPageLRU");
+	    put_page(page);
+	    goto lru_unlock;
     }
     
     list_move(&page->lru, &l_active);
@@ -274,13 +280,16 @@ void move_page_to_active_lru(struct page *page)
 		    -thp_nr_pages(page));
     SetPageActive(page);
 
-    if (!list_empty(&l_active))
-	move_pages_to_lru(lruvec, &l_active);
+    if (!list_empty(&l_active)){
+        unsigned int nr;
+        nr = move_pages_to_lru(lruvec, &l_active);
+        printk("ok move pages to lru and the nr is %d", nr);
+    }
 lru_unlock:
     spin_unlock_irq(&lruvec->lru_lock);
 
     if (!list_empty(&l_active))
-	BUG();
+	    BUG();
 }
 
 void move_page_to_inactive_lru(struct page *page)
@@ -323,7 +332,7 @@ static void update_base_page(struct vm_area_struct *vma,
 	struct page *page, pginfo_t *pginfo)
 {
     // struct mem_cgroup *memcg = get_mem_cgroup_from_mm(vma->vm_mm);
-    unsigned long prev_accessed, prev_idx, cur_idx, tmp_addr;
+    unsigned long prev_accessed, prev_idx, cur_idx;
     bool hot;
 
 
@@ -334,41 +343,16 @@ static void update_base_page(struct vm_area_struct *vma,
     prev_idx = get_idx(prev_accessed); //所在bins的位置
     cur_idx = get_idx(pginfo->total_accesses); //我可以用这个来提升在lru两部分的移动吧
 
-    //暂时不知道这些参数干嘛的
-    // spin_lock(&memcg->access_lock);
-    // if (pginfo->may_hot == true)
-	// memcg->max_dram_sampled++;
-    // if (cur_idx >= (memcg->bp_active_threshold))
-	// pginfo->may_hot = true;
-    // else
-	// pginfo->may_hot = false;
-
-    // spin_unlock(&memcg->access_lock);
-    
-    // 在这一步在lru两个部分之间移动hot = cur_idx >= memcg->active_threshold;
     if(cur_idx >= 10){ //小页面元数据*512，12
         hot = true;
     }else{
         hot = false;
     }
-    if (PageActive(page) && !hot)
-	    move_page_to_inactive_lru(page);
-    else if (!PageActive(page) && hot)
-	    move_page_to_active_lru(page);
     
     if (hot)
 	    move_page_to_active_lru(page);
     else if (PageActive(page))
 	    move_page_to_inactive_lru(page);
-
-    tmp_addr = page_to_phys(page);
-    if(tmp_addr <= DRAM_ADDR_END){
-        hit_dram += 1;
-    }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
-        hit_pm += 1;
-    }else{
-        hit_other += 1;
-    }
 }
 // 前后这两个针对base和huge的页面是这次要改要做调整的主要函数
 static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
@@ -379,7 +363,7 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
     pginfo_t *pginfo;
     unsigned long prev_idx, cur_idx;
     bool hot, pg_split = false;
-    unsigned long pginfo_prev, tmp_addr;
+    unsigned long pginfo_prev;
 
     meta_page = get_meta_page(page); //大页的访问信息记录主要就靠这个结构体
     pginfo = get_compound_pginfo(page, address);
@@ -408,31 +392,22 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
 	return;
 
     // hot = cur_idx >= memcg->active_threshold;
-    if(cur_idx >= 5){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
+    if(cur_idx >= 4){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
        hot = true;
     }else{
         hot = false;
     }
 
-    if (PageActive(page) && !hot) {
-	    move_page_to_inactive_lru(page);
-    } else if (!PageActive(page) && hot) {
-	    move_page_to_active_lru(page);
-    }
+    // if (PageActive(page) && !hot) {
+	//     move_page_to_inactive_lru(page);
+    // } else if (!PageActive(page) && hot) {
+	//     move_page_to_active_lru(page);
+    // }
     
     if (hot)
 	    move_page_to_active_lru(page);
     else if (PageActive(page))
 	    move_page_to_inactive_lru(page);
-
-    tmp_addr = page_to_phys(page);
-    if(tmp_addr <= DRAM_ADDR_END){
-        hit_dram += 1;
-    }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
-        hit_pm += 1;
-    }else{
-        hit_other += 1;
-    }
 }
 
 static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
@@ -443,6 +418,7 @@ static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
     pginfo_t *pginfo;
     struct page *page, *pte_page;
     int ret = 0;
+    unsigned long tmp_addr;
 
     pte = pte_offset_map_lock(vma->vm_mm, pmd, address, &ptl);
     ptent = *pte;
@@ -463,6 +439,16 @@ static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
     pginfo = get_pginfo_from_pte(pte);
     if (!pginfo)
 	goto pte_unlock;
+
+    tmp_addr = page_to_phys(page);
+    hit_total += 1;
+    if(tmp_addr <= DRAM_ADDR_END){
+        hit_dram += 1;
+    }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
+        hit_pm += 1;
+    }else{
+        hit_other += 1;
+    }
 
     update_base_page(vma, page, pginfo);
     pte_unmap_unlock(pte, ptl);
@@ -489,49 +475,70 @@ static int __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
 {
     pmd_t *pmd, pmdval;
     bool ret = 0;
+    unsigned long tmp_addr;
 
     pmd = pmd_offset(pud, address);
-    if (!pmd || pmd_none(*pmd))
-	return ret;
-    
-    if (is_swap_pmd(*pmd))
-	return ret;
-
+    if (!pmd || pmd_none(*pmd)){
+        printk("__update_pmd_pginfo !pmd || pmd_none(*pmd)");
+        return ret;
+    }
+	
+    if (is_swap_pmd(*pmd)){
+        printk("__update_pmd_pginfo is_swap_pmd(*pmd)");
+        return ret;
+    }
+	
     if (!pmd_trans_huge(*pmd) && !pmd_devmap(*pmd) && unlikely(pmd_bad(*pmd))) {
-	pmd_clear_bad(pmd);
-	return ret;
+        printk("__update_pmd_pginfo !pmd_trans_huge(*pmd) && !pmd_devmap(*pmd) && unlikely(pmd_bad(*pmd))");
+	    pmd_clear_bad(pmd);
+	    return ret;
     }
 
     pmdval = *pmd;
     if (pmd_trans_huge(pmdval) || pmd_devmap(pmdval)) {
-	struct page *page;
+        struct page *page;
 
-	if (is_huge_zero_pmd(pmdval))
-	    return ret;
-	
-	page = pmd_page(pmdval);
-	if (!page)
-	    goto pmd_unlock;
-	
-	if (!PageCompound(page)) {
-	    goto pmd_unlock;
-	}
+        if (is_huge_zero_pmd(pmdval)){
+            printk("__update_pmd_pginfo is_huge_zero_pmd(pmdval)");
+            return ret;
+        }
+        
+        page = pmd_page(pmdval);
+        if (!page){
+            printk("__update_pmd_pginfo !page");
+            goto pmd_unlock;
+        }
+        
+        if (!PageCompound(page)) {
+            printk("__update_pmd_pginfo !PageCompound(page)");
+            goto pmd_unlock;
+	    }
 
-	update_huge_page(vma, pmd, page, address);
-	if (htmm_cxl_mode) {
-	    if (page_to_nid(page) == 0)
-		return 1;
-	    else
-		return 2;
-	}
-	else {
-	    if (node_is_toptier(page_to_nid(page)))
-		return 1;
-	    else
-		return 2;
-	}
-pmd_unlock:
-	return 0;
+        tmp_addr = page_to_phys(page);
+        hit_total += 1;
+        if(tmp_addr <= DRAM_ADDR_END){
+            hit_dram += 1;
+        }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
+            hit_pm += 1;
+        }else{
+            hit_other += 1;
+        }
+
+        update_huge_page(vma, pmd, page, address);
+        if (htmm_cxl_mode) {
+            if (page_to_nid(page) == 0)
+            return 1;
+            else
+            return 2;
+        }
+        else {
+            if (node_is_toptier(page_to_nid(page)))
+            return 1;
+            else
+            return 2;
+        }
+    pmd_unlock:
+        return 0;
     }
 
     /* base page */
@@ -545,16 +552,22 @@ static int __update_pginfo(struct vm_area_struct *vma, unsigned long address)
     pud_t *pud;
 
     pgd = pgd_offset(vma->vm_mm, address);
-    if (pgd_none_or_clear_bad(pgd))
-	return 0;
+    if (pgd_none_or_clear_bad(pgd)){
+        printk("__update_pginfo pgd_none_or_clear_bad");
+        return 0;
+    }
     
     p4d = p4d_offset(pgd, address);
-    if (p4d_none_or_clear_bad(p4d))
-	return 0;
+    if (p4d_none_or_clear_bad(p4d)){
+        printk("__update_pginfo p4d_none_or_clear_bad");
+        return 0;
+    }
     
     pud = pud_offset(p4d, address);
-    if (pud_none_or_clear_bad(pud))
-	return 0;
+    if (pud_none_or_clear_bad(pud)){
+        printk("__update_pginfo pud_none_or_clear_bad");
+        return 0;
+    }
     
     return __update_pmd_pginfo(vma, pud, address);
 }
@@ -587,27 +600,38 @@ void update_pginfo(pid_t pid, unsigned long address, enum events e)
     static unsigned long last_thres_adaptation;
     last_thres_adaptation= jiffies;
 
-    if (htmm_mode == HTMM_NO_MIG)
-		goto put_task;
+    if (htmm_mode == HTMM_NO_MIG){
+        printk("update pginfo htmm no mig");
+        goto put_task;
+    }
 
     if (!mm) {
+        printk("update pginfo ! mm");
 		goto put_task;
     }
 
-    if (!mmap_read_trylock(mm))
-		goto put_task;
+    if (!mmap_read_trylock(mm)){
+        printk("update pginfo mmap_read_trylock");
+        goto put_task;
+    }
 
     vma = find_vma(mm, address);
-    if (unlikely(!vma))
-		goto mmap_unlock;
-    
+    if (unlikely(!vma)){
+        printk("update pginfo unlikely(!vma)");
+        goto mmap_unlock;
+    }
+		
     if (!vma->vm_mm || !vma_migratable(vma) ||
-	(vma->vm_file && (vma->vm_flags & (VM_READ | VM_WRITE)) == (VM_READ)))
-		goto mmap_unlock;
-    
+	(vma->vm_file && (vma->vm_flags & (VM_READ | VM_WRITE)) == (VM_READ))){
+        printk("update pginfo !vma_migratable");
+        goto mmap_unlock;
+    }
+		
     memcg = get_mem_cgroup_from_mm(mm);
-    if (!memcg || !memcg->htmm_enabled)
-		goto mmap_unlock;
+    if (!memcg || !memcg->htmm_enabled){
+        printk("update pginfo memcg->htmm_enabled");
+        goto mmap_unlock;
+    }
     
     /* increase sample counts only for valid records */
     ret = __update_pginfo(vma, address);

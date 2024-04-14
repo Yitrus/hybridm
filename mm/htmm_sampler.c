@@ -29,8 +29,14 @@ static __u64 get_pebs_event(enum events e)
     switch (e) { 
 	case LLC_MISS:
 		return PERF_COUNT_HW_CACHE_MISSES;
+	case DRAMREAD:
+	    return DRAM_LLC_LOAD_MISS;
+	case NVMREAD:
+		return NVM_LLC_LOAD_MISS;
+	case MEMWRITE:
+	    return ALL_STORES;
 	default:
-	    return PERF_COUNT_HW_CACHE_MISSES;
+	    return N_HTMMEVENTS;
     }
 }
 
@@ -43,14 +49,17 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
 
     memset(&attr, 0, sizeof(struct perf_event_attr));
 
-	// attr.type = PERF_TYPE_RAW;
-	attr.type = PERF_TYPE_HARDWARE;
-
+	if(config == PERF_COUNT_HW_CACHE_MISSES){
+		attr.type = PERF_TYPE_HARDWARE;
+	}else{
+		attr.type = PERF_TYPE_RAW;
+	}
+	
     attr.size = sizeof(struct perf_event_attr);
     attr.config = config; //要监测的采样事件
     attr.config1 = config1;
 
-	attr.sample_period = 200014;
+	attr.sample_period = 100014;
 
     attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR;
     attr.disabled = 0;
@@ -125,6 +134,7 @@ static void pebs_disable(void)
 }
 
 unsigned int hit_ratio = 0;
+unsigned long long hit_total = 0;
 unsigned long hit_dram;
 unsigned long hit_pm;
 unsigned long hit_other;

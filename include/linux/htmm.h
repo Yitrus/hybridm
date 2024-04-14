@@ -89,12 +89,12 @@ struct htmm_event {
 };
 
 enum events {
-    LLC_MISS = 0,
-    // DRAMREAD = 0,
-    // NVMREAD = 1,
-    // MEMWRITE = 2,
-    // TLB_MISS_LOADS = 3,
-    // TLB_MISS_STORES = 4,
+    DRAMREAD = 0,
+    NVMREAD = 1,
+    MEMWRITE = 2,
+    TLB_MISS_LOADS = 3,
+    TLB_MISS_STORES = 4,
+    LLC_MISS = 5,
     // CXLREAD = 5, // emulated by remote DRAM node
     N_HTMMEVENTS
 };
@@ -130,6 +130,7 @@ extern unsigned int hit_ratio;
 extern unsigned long hit_dram;
 extern unsigned long hit_pm;
 extern unsigned long hit_other;
+extern unsigned long long hit_total;
 
 /* htmm_migrater.c */
 #define HTMM_MIN_FREE_PAGES 256 * 10 // 10MB
