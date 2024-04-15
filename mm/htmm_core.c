@@ -283,7 +283,7 @@ void move_page_to_active_lru(struct page *page)
     if (!list_empty(&l_active)){
         unsigned int nr;
         nr = move_pages_to_lru(lruvec, &l_active);
-        printk("ok move pages to lru and the nr is %d", nr);
+        // printk("ok move pages to lru and the nr is %d", nr);
     }
 lru_unlock:
     spin_unlock_irq(&lruvec->lru_lock);
@@ -336,25 +336,30 @@ static void update_base_page(struct vm_area_struct *vma,
     bool hot;
 
 
-    prev_accessed = pginfo->total_accesses; //以前被访问的次数？
+    // prev_accessed = pginfo->total_accesses; //以前被访问的次数？
     pginfo->nr_accesses++; //这次被访问的次数累计
     pginfo->total_accesses += HPAGE_PMD_NR;
     
-    prev_idx = get_idx(prev_accessed); //所在bins的位置
-    cur_idx = get_idx(pginfo->total_accesses); //我可以用这个来提升在lru两部分的移动吧
+    // prev_idx = get_idx(prev_accessed); //所在bins的位置
+    cur_idx = get_idx(pginfo->nr_accesses); //我可以用这个来提升在lru两部分的移动吧
 
-    if(cur_idx >= 10){ //小页面元数据*512，12
+    if(cur_idx >= 2){ //小页面元数据*512，12
         hot = true;
     }else{
         hot = false;
     }
     
-    if (hot){
-        pginfo->total_accesses = pginfo->total_accesses >> 1;
+    if (hot && !PageActive(page)){
+        pginfo->total_accesses = pginfo->nr_accesses >> 1;
         move_page_to_active_lru(page);
     }
-    else if (PageActive(page))
-	    move_page_to_inactive_lru(page);
+    // else if (PageActive(page)){
+    //     if(pginfo->total_accesses <= 4){
+    //         move_page_to_inactive_lru(page);
+    //     }
+        // pginfo->total_accesses -= 1; //在活跃链表里，但最近不热了，受到惩罚
+    // }
+	    
 }
 // 前后这两个针对base和huge的页面是这次要改要做调整的主要函数
 static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
@@ -407,13 +412,17 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
 	//     move_page_to_active_lru(page);
     // }
     
-    if (hot){
-         meta_page->total_accesses = meta_page->total_accesses >> 2;
+    if (hot && !PageActive(page)){
+         meta_page->total_accesses = meta_page->total_accesses >> 1;
          meta_page->idx -= 1; 
          move_page_to_active_lru(page);
     }
-    else if (PageActive(page))
-	    move_page_to_inactive_lru(page);
+    // else if (PageActive(page)){
+    //     if(meta_page->total_accesses <= 14){
+    //         //活跃页面在active里，但是，后面没访问了，就仍走
+    //         move_page_to_inactive_lru(page);
+    //     }
+    // }
 }
 
 static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,

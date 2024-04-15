@@ -28,7 +28,7 @@ static __u64 get_pebs_event(enum events e)
 { //主要是这些peb事件还不能理解
     switch (e) { 
 	case LLC_MISS:
-		return PERF_COUNT_HW_CACHE_MISSES;
+		return LLC_MISS_DIF1;
 	case DRAMREAD:
 	    return DRAM_LLC_LOAD_MISS;
 	case NVMREAD:
@@ -49,17 +49,19 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
 
     memset(&attr, 0, sizeof(struct perf_event_attr));
 
-	if(config == PERF_COUNT_HW_CACHE_MISSES){
-		attr.type = PERF_TYPE_HARDWARE;
-	}else{
-		attr.type = PERF_TYPE_RAW;
-	}
+	// if(config == PERF_COUNT_HW_CACHE_MISSES){
+	// 	attr.type = PERF_TYPE_HARDWARE;
+	// }else{
+	// 	attr.type = PERF_TYPE_RAW;
+	// }
 	
+	attr.type = PERF_TYPE_RAW;
+
     attr.size = sizeof(struct perf_event_attr);
     attr.config = config; //要监测的采样事件
     attr.config1 = config1;
 
-	attr.sample_period = 100014;
+	attr.sample_period = 50014;
 
     attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR;
     attr.disabled = 0;
@@ -128,9 +130,10 @@ static void pebs_disable(void)
 	for (event = 0; event < N_HTMMEVENTS; event++) {
 	    if (mem_event[cpu][event])
 			perf_event_disable(mem_event[cpu][event]);
+		printk("-----------pebs disable one-----------");
 	}
     }
-	printk("-----------pebs disable-----------");
+	printk("-----------pebs disable finish-----------");
 }
 
 unsigned int hit_ratio = 0;
@@ -150,15 +153,15 @@ static int ksamplingd(void *data)
 
     while (!kthread_should_stop()) {
 		int cpu, event, cond = false;
-		hit_dram = 0;
-		hit_pm = 0;
-		hit_other = 0;
     
 		if (htmm_mode == HTMM_NO_MIG) {
 			msleep_interruptible(10000);
 			continue;
 		}
 	
+		hit_dram = 0;
+		hit_pm = 0;
+		hit_other = 0;
 		for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 			for (event = 0; event < N_HTMMEVENTS; event++) {
 				//处理某个cpu的某个事件的采样缓冲区数据

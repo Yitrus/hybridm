@@ -467,7 +467,7 @@ static unsigned long promote_page_list(struct list_head *page_list,
 __keep_locked:
 		unlock_page(page);
 __keep:
-		//printk("failed promote page");
+		printk("failed promote page");
 		//大部分页面加入这个链表了，都没办法迁移。
 		list_add(&page->lru, &ret_pages);
     }
@@ -735,7 +735,7 @@ static int kmigraterd(void *p)
 {
     pg_data_t *pgdat = (pg_data_t *)p;
     int nid = pgdat->node_id;
-	pg_data_t *pgdat2 = NODE_DATA(2);
+	pg_data_t *pgdat2 = NODE_DATA(next_demotion_node(nid));
 	if(pgdat == NULL || pgdat2==NULL){
 		printk("kmigrated pgdat one is NULL");
 		kmigraterd_stop();
@@ -789,7 +789,7 @@ static int kmigraterd(void *p)
 	
 		get_best_action(&nr_action);
 		need_lowertier_promotion(pgdat2, memcg2, &nr_action); 
-		printk("nr_action %d", nr_action);
+		// printk("nr_action %d", nr_action);
 		if(nr_action >0 && nr_action <= INT_MAX){ //如果有行动的话
 			//可能存在最初空闲太多的情况，但是这个判断一直不太正确,所以实际操作传入的还是nr_action,nr_available没怎么用
 			//nr_demotion = (unsigned long)nr_action - nr_available; 
@@ -818,14 +818,14 @@ void kmigraterd_wakeup(int nid)
 static void kmigraterd_run(int nid)
 {
     pg_data_t *pgdat = NODE_DATA(nid);
-	pg_data_t *pgdat2 = NODE_DATA(2);
+	pg_data_t *pgdat2 = NODE_DATA((next_demotion_node(nid)));
     if (!pgdat || pgdat->kmigraterd){
-		printk("node 0 struct null");
+		printk("node DRAM struct null");
 		return;
 	}
 
 	if (!pgdat2 || pgdat2->kmigraterd){
-		printk("node 2 struct null");
+		printk("node PM struct null");
 		return;
 	}
 		
@@ -833,7 +833,7 @@ static void kmigraterd_run(int nid)
 
     pgdat->kmigraterd = kthread_run(kmigraterd, pgdat, "kmigraterd%d", nid);
 	if(pgdat->kmigraterd == NULL){
-		printk("node 0 kmigraterd NULL");
+		printk("node DRAM kmigraterd NULL");
 	}else{
 		pgdat2->kmigraterd = pgdat->kmigraterd;
 	}
@@ -845,35 +845,42 @@ static void kmigraterd_run(int nid)
     }
 
 	if (IS_ERR(pgdat2->kmigraterd)) {
-		pr_err("Fails to start kmigraterd on node 2");
+		pr_err("Fails to start kmigraterd on node PM");
 		pgdat2->kmigraterd = NULL;
     }
 
 	printk("----------------kmigraterd run normally----------------");
 }
 
-// 这里启动和结束只考虑1个节点
+// 这里启动和结束只考虑1个节点, 加入这次尝试就用1看看会不会内核崩溃
 void kmigraterd_stop(void)
 {
-    int nid = 0;
+    int nid;
 
-    //for_each_node_state(nid, N_MEMORY) {
+    for_each_node_state(nid, N_MEMORY) {
+		if(nid >= 2){
+			continue;
+		}
 		struct task_struct *km = NODE_DATA(nid)->kmigraterd;
 
 		if (km) {
 	    	kthread_stop(km);
 	    	NODE_DATA(nid)->kmigraterd = NULL;
-			NODE_DATA(2)->kmigraterd = NULL; 
+			NODE_DATA((next_demotion_node(nid)))->kmigraterd = NULL; 
 			printk("----------------kmigraterd stop normally----------------");
 		}
-    //}
+    }
 }
 
 int kmigraterd_init(void)
 {
-    int nid = 0;
+    int nid;
 
-    //for_each_node_state(nid, N_MEMORY)
-	kmigraterd_run(nid);
+    for_each_node_state(nid, N_MEMORY){
+		if(nid >= 2){
+			continue;
+		}
+		kmigraterd_run(nid);
+	}
     return 0;
 }

@@ -12,8 +12,8 @@
 
 /* 定义判断地址的常量 16进制*/
 #define DRAM_ADDR_END 0x207fffffff
-#define PM_ADDR_START 0x2100000000
-#define PM_ADDR_END 0x9e7fffffff
+#define PM_ADDR_START 0x2080000000
+#define PM_ADDR_END 0x11c7fffffff
 
 /* pebs events */
 #define DRAM_LLC_LOAD_MISS  0x1d3
@@ -23,6 +23,9 @@
 #define ALL_LOADS	    0x81d0
 #define STLB_MISS_STORES    0x12d0
 #define STLB_MISS_LOADS	    0x11d0
+#define LLC_MISS_DIF1 0x41
+#define LLC_MISS_DIF2 0x0a
+#define LLC_MISS_DIF3 0x0b
 
 /* tmm option */
 #define HTMM_NO_MIG	    0x0	/* unused */
