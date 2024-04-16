@@ -61,7 +61,7 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     attr.config = config; //要监测的采样事件
     attr.config1 = config1;
 
-	attr.sample_period = 50014;
+	attr.sample_period = 100007;
 
     attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR;
     attr.disabled = 0;
@@ -130,17 +130,19 @@ static void pebs_disable(void)
 	for (event = 0; event < N_HTMMEVENTS; event++) {
 	    if (mem_event[cpu][event])
 			perf_event_disable(mem_event[cpu][event]);
-		printk("-----------pebs disable one-----------");
+		// printk("-----------pebs disable one-----------");
 	}
     }
 	printk("-----------pebs disable finish-----------");
 }
 
 unsigned int hit_ratio = 0;
-unsigned long long hit_total = 0;
-unsigned long hit_dram;
-unsigned long hit_pm;
-unsigned long hit_other;
+// unsigned long long hit_total = 0;
+unsigned long hit_dram = 0;
+unsigned long hit_pm = 0;
+unsigned long hit_other = 0;
+unsigned long next_hit_dram = 0;
+unsigned long next_hit_pm = 0;
 static int ksamplingd(void *data)
 {
 	unsigned long sleep_timeout;
@@ -159,9 +161,8 @@ static int ksamplingd(void *data)
 			continue;
 		}
 	
-		hit_dram = 0;
-		hit_pm = 0;
-		hit_other = 0;
+		next_hit_dram = 0;
+		next_hit_pm = 0;
 		for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 			for (event = 0; event < N_HTMMEVENTS; event++) {
 				//处理某个cpu的某个事件的采样缓冲区数据
@@ -244,6 +245,8 @@ static int ksamplingd(void *data)
 	    	}
 		}	
 
+		hit_dram = next_hit_dram;
+		hit_pm = next_hit_pm;
 		if(hit_dram == 0){
 			hit_ratio = 0;
 		}else if(hit_pm == 0){

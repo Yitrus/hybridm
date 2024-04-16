@@ -456,11 +456,11 @@ static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
 	goto pte_unlock;
 
     tmp_addr = page_to_phys(page);
-    hit_total += 1;
+    // hit_total += 1;
     if(tmp_addr <= DRAM_ADDR_END){
-        hit_dram += 1;
+        next_hit_dram += 1;
     }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
-        hit_pm += 1;
+        next_hit_pm += 1;
     }else{
         hit_other += 1;
     }
@@ -530,11 +530,11 @@ static int __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
 	    }
 
         tmp_addr = page_to_phys(page);
-        hit_total += 1;
+        // hit_total += 1;
         if(tmp_addr <= DRAM_ADDR_END){
-            hit_dram += 1;
+            next_hit_dram += 1;
         }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
-            hit_pm += 1;
+            next_hit_pm += 1;
         }else{
             hit_other += 1;
         }

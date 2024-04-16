@@ -1,8 +1,19 @@
 # TODO:
-18. 再次启动时内核崩溃, 这问题时有时无(可能是迁移线程绑定的原因)。
-20. lru内部策略，采样的指标会影响效果,增大采样频率
-21. 第一阶段应该是采样的内部调整，第二阶段迁移可能会有被锁住的情况
-22. 给两个节点都绑定采样线程，都限制大小（这样就随意程序最后选择哪个socket）
+21. 第一阶段应该是采样的内部调整；第二阶段迁移可能会有被锁住的情况isolate_lru_page_prepare（确认这是不是被锁住了）；在最近的地方输出想要的action；或者我们直接先扔过去，由迁移再来挪走。
+22. 再次启动时内核崩溃, 这问题时有时无(可能是迁移线程绑定的原因)。
+
+[ 2158.141814] promote success nr 1
+[ 2158.141826] promote success nr 2
+[ 2158.141849] promote success nr 4
+[ 2158.141857] promote success nr 1
+[ 2158.141858] PM NODE AFTER the lru mesg active_anon 748 inactive_anon 8353197 active_file 32 inactive_file 160
+[ 2188.861596] BEFORE the lru mesg active_anon 56 inactive_anon 1066081 active_file 752 inactive_file 5486714
+[ 2188.861747] AFTER the lru mesg active_anon 57 inactive_anon 1066087 active_file 720 inactive_file 5486714
+[ 2188.861748] PM NODE BEFORE the lru mesg active_anon 2051 inactive_anon 10011184 active_file 62 inactive_file 160
+[ 2188.861760] promote success nr 1
+[ 2188.861777] promote success nr 2
+[ 2188.861805] promote success nr 4
+[ 2188.861813] promote success nr 1
 
 # Problem：
 用小页面时__update_pmd_pginfo !pmd || pmd_none(*pmd)

@@ -133,7 +133,9 @@ extern unsigned int hit_ratio;
 extern unsigned long hit_dram;
 extern unsigned long hit_pm;
 extern unsigned long hit_other;
-extern unsigned long long hit_total;
+// extern unsigned long long hit_total;
+extern unsigned long next_hit_dram;
+extern unsigned long next_hit_pm;
 
 /* htmm_migrater.c */
 #define HTMM_MIN_FREE_PAGES 256 * 10 // 10MB
