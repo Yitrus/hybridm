@@ -332,7 +332,7 @@ static void update_base_page(struct vm_area_struct *vma,
 	struct page *page, pginfo_t *pginfo)
 {
     // struct mem_cgroup *memcg = get_mem_cgroup_from_mm(vma->vm_mm);
-    unsigned long prev_accessed, prev_idx, cur_idx;
+    // unsigned long prev_accessed, prev_idx, cur_idx;
     bool hot;
 
 
@@ -341,16 +341,16 @@ static void update_base_page(struct vm_area_struct *vma,
     pginfo->total_accesses += HPAGE_PMD_NR;
     
     // prev_idx = get_idx(prev_accessed); //所在bins的位置
-    cur_idx = get_idx(pginfo->nr_accesses); //我可以用这个来提升在lru两部分的移动吧
+    // cur_idx = get_idx(pginfo->nr_accesses); //我可以用这个来提升在lru两部分的移动吧
 
-    if(cur_idx >= 2){ //小页面元数据*512，12
+    if(pginfo->nr_accesses >= 2){ //小页面元数据*512，12; 不乘以元数据后，采样本身就表示频率比较高，试试门槛为被采样到2次
         hot = true;
     }else{
         hot = false;
     }
     
     if (hot && !PageActive(page)){
-        pginfo->total_accesses = pginfo->nr_accesses >> 1;
+        // pginfo->total_accesses = pginfo->nr_accesses >> 1;
         move_page_to_active_lru(page);
     }
     // else if (PageActive(page)){
@@ -400,7 +400,7 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
 	return;
 
     // hot = cur_idx >= memcg->active_threshold;
-    if(cur_idx >= 4){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
+    if(cur_idx >= 3){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
        hot = true;
     }else{
         hot = false;

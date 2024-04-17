@@ -7595,7 +7595,7 @@ subsys_initcall(mem_cgroup_htmm_init);
 
 static int hit_ratio_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "%d %lu %lu %lu %llu\n", hit_ratio, hit_other,hit_dram, hit_pm, hit_total);
+	seq_printf(m, "%d %lu %lu %lu \n", hit_ratio, hit_other,hit_dram, hit_pm);
     return 0;
 }
 
@@ -7624,7 +7624,7 @@ static ssize_t action_write(struct kernfs_open_file *of,
 	*ptr_action = (unsigned int)train_action;
 	// printk("Value pointed by ptr_action: %d", *ptr_action);
 	
-	// printk("have been write nr_action %d", nr_action);
+	printk("have been write nr_action %d", nr_action);
 
 	return nbytes;
 }

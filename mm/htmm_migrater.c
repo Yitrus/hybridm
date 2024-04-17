@@ -45,7 +45,7 @@
 #define prefetchw_prev_lru_page_promotion(_page, _base, _field) do { } while (0)
 #endif
 
-unsigned int nr_action;
+unsigned int nr_action = 8;
 
 void add_memcg_to_kmigraterd(struct mem_cgroup *memcg, int nid)
 {
@@ -672,16 +672,16 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 		priority--;
     } while (priority);
 
-	if(nr_promoted < nr_to_promote){
-		priority = DEF_PRIORITY;
-		lru = LRU_INACTIVE_ANON;
-		do {
-			nr_promoted += promote_lruvec(nr_to_promote, priority, pgdat, lruvec, lru);
-			if (nr_promoted >= nr_to_promote)
-	    		break;
-			priority--;
-    	} while (priority);
-	}
+	// if(nr_promoted < nr_to_promote){
+	// 	priority = DEF_PRIORITY;
+	// 	lru = LRU_INACTIVE_ANON;
+	// 	do {
+	// 		nr_promoted += promote_lruvec(nr_to_promote, priority, pgdat, lruvec, lru);
+	// 		if (nr_promoted >= nr_to_promote)
+	//     		break;
+	// 		priority--;
+    // 	} while (priority);
+	// }
 
 	lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
 	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
@@ -741,8 +741,6 @@ static int kmigraterd(void *p)
 		kmigraterd_stop();
 	}
 
-// 假设已经获得需要操作的数量，现在判断上下应该被迁移的数目
-// 这些操作是根据cgroup来做的, 遍历node 0的
 	for ( ; ; ) {
 	    struct mem_cgroup_per_node *pn;
 	    struct mem_cgroup *memcg;
@@ -787,18 +785,17 @@ static int kmigraterd(void *p)
 	        continue;
 	    }
 	
-		get_best_action(&nr_action);
-		need_lowertier_promotion(pgdat2, memcg2, &nr_action); 
+		// printk("before nr_action %d", nr_action);
+		// 这个函数可以在调试合适后打开
+		// need_lowertier_promotion(pgdat2, memcg2, &nr_action); 
 		// printk("nr_action %d", nr_action);
-		if(nr_action >0 && nr_action <= INT_MAX){ //如果有行动的话
+		if(nr_action >0 && nr_action <= INT_MAX){
 			//可能存在最初空闲太多的情况，但是这个判断一直不太正确,所以实际操作传入的还是nr_action,nr_available没怎么用
 			//nr_demotion = (unsigned long)nr_action - nr_available; 
 			if(!promotion_available(nid, memcg, &nr_available)){ //true表示还有空余页面
 				kmigraterd_demotion(pgdat, memcg, nr_action);
 			}
-		}
 
-		if(nr_action >0 && nr_action <= INT_MAX){
 			kmigraterd_promotion(pgdat2, memcg2);
 		}
 		

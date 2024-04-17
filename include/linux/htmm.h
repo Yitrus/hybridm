@@ -23,6 +23,7 @@
 #define ALL_LOADS	    0x81d0
 #define STLB_MISS_STORES    0x12d0
 #define STLB_MISS_LOADS	    0x11d0
+
 #define LLC_MISS_DIF1 0x41
 #define LLC_MISS_DIF2 0x0a
 #define LLC_MISS_DIF3 0x0b
@@ -92,12 +93,13 @@ struct htmm_event {
 };
 
 enum events {
-    DRAMREAD = 0,
-    NVMREAD = 1,
-    MEMWRITE = 2,
-    TLB_MISS_LOADS = 3,
-    TLB_MISS_STORES = 4,
-    LLC_MISS = 5,
+    // DRAMREAD = 0,
+    // NVMREAD = 1,
+    MEMWRITE = 0,
+    // TLB_MISS_LOADS = 3,
+    // TLB_MISS_STORES = 4,
+    LLC_MISS_PERF = 1,
+    LLC_MISS = 2,
     // CXLREAD = 5, // emulated by remote DRAM node
     N_HTMMEVENTS
 };
@@ -150,5 +152,5 @@ extern void kmigraterd_stop(void);
 extern unsigned int nr_action;
 
 /*qtable.c*/
-extern void get_best_action(unsigned int *nr_action);
+// extern void get_best_action(unsigned int *nr_action);
 

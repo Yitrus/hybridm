@@ -25,14 +25,16 @@ static bool valid_va(unsigned long addr)
 }
 
 static __u64 get_pebs_event(enum events e)
-{ //主要是这些peb事件还不能理解
+{ //主要是这些peb事件还不能理解; 因为原来这个效果不错，应该啊保留也没问题
     switch (e) { 
+	case LLC_MISS_PERF:
+		return PERF_COUNT_HW_CACHE_MISSES; //怀疑这个不行，没法得到地址
+	// case DRAMREAD:
+	//     return DRAM_LLC_LOAD_MISS;
+	// case NVMREAD:
+	// 	return NVM_LLC_LOAD_MISS;
 	case LLC_MISS:
 		return LLC_MISS_DIF1;
-	case DRAMREAD:
-	    return DRAM_LLC_LOAD_MISS;
-	case NVMREAD:
-		return NVM_LLC_LOAD_MISS;
 	case MEMWRITE:
 	    return ALL_STORES;
 	default:
@@ -49,19 +51,19 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
 
     memset(&attr, 0, sizeof(struct perf_event_attr));
 
-	// if(config == PERF_COUNT_HW_CACHE_MISSES){
-	// 	attr.type = PERF_TYPE_HARDWARE;
-	// }else{
-	// 	attr.type = PERF_TYPE_RAW;
-	// }
+	if(config == PERF_COUNT_HW_CACHE_MISSES){
+		attr.type = PERF_TYPE_HARDWARE;
+	}else{
+		attr.type = PERF_TYPE_RAW;
+	}
 	
-	attr.type = PERF_TYPE_RAW;
+	// attr.type = PERF_TYPE_RAW;
 
     attr.size = sizeof(struct perf_event_attr);
     attr.config = config; //要监测的采样事件
     attr.config1 = config1;
 
-	attr.sample_period = 100007;
+	attr.sample_period = 10007;
 
     attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR;
     attr.disabled = 0;
@@ -147,7 +149,7 @@ static int ksamplingd(void *data)
 {
 	unsigned long sleep_timeout;
 
-	sleep_timeout = msecs_to_jiffies(25000); //毫秒和秒是1000
+	sleep_timeout = msecs_to_jiffies(15000); //毫秒和秒是1000
 	
     // const struct cpumask *cpumask = cpumask_of_node(0);
     // if (!cpumask_empty(cpumask))
@@ -245,6 +247,7 @@ static int ksamplingd(void *data)
 	    	}
 		}	
 
+		printk("one sample finished");
 		hit_dram = next_hit_dram;
 		hit_pm = next_hit_pm;
 		if(hit_dram == 0){

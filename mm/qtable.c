@@ -1,10 +1,10 @@
-#include <linux/htmm.h>
+// #include <linux/htmm.h>
 
 //这个Q-Table的横纵坐标
 // #define NUM_STATES 10
 // #define NUM_ACTIONS 10
 
-unsigned int suj_action=8; //nr_action是全局变量，每次更新完状态，通过这个桥梁更新action
+// unsigned int suj_action=8; //nr_action是全局变量，每次更新完状态，通过这个桥梁更新action
 
 // 显式初始化Q-Table
 // unsigned int Q[NUM_STATES][NUM_ACTIONS] = {
@@ -21,10 +21,10 @@ unsigned int suj_action=8; //nr_action是全局变量，每次更新完状态，
 // };
 
 // 不放在内核了，有点搞笑奥
-void get_best_action(unsigned int *nr_action){
-	*nr_action = suj_action;
-	return;
-}
+// void get_best_action(unsigned int *nr_action){
+// 	*nr_action = suj_action;
+// 	return;
+// }
 
 // 假设的状态到索引的映射函数
 // int map_state_to_index(unsigned long long A[], unsigned long long B[]) {
