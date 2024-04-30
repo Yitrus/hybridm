@@ -1,8 +1,10 @@
 # TODO:
 22. 再次启动时内核崩溃, 这问题时有时无(可能是迁移线程绑定的原因)。
+23. 会有很长的时间段，采样不到任何东西？ratio 0 others 0 dram 0 pm 0
+24. 大页阈值低了，应该升高；基本页面看起来是合适的，但是显然采样的数据准确度90以下，需要将采样的效果加强
+25. 取消部分注释have been write nr_action
 
 # Problem：
-第一阶段应该是采样的内部调整__update_pmd_pginfo !pmd || pmd_none(*pmd)；第二阶段迁移可能会有被锁住的情况isolate_lru_page_prepare（确认这是不是被锁住了）；在最近的地方输出想要的action；或者我们直接先扔过去，由迁移再来挪走。阶数更高的直接挪走，阶数矮一点的再放在active去。
 
 # 获取状态
 next_promotion_node，升级去的节点，找到对应DRAM节点；

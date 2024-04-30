@@ -363,7 +363,7 @@ static unsigned long migrate_page_list(struct list_head *migrate_list,
 	    target_nid, MIGRATE_ASYNC, MR_NUMA_MISPLACED, &nr_succeeded);
 
     if (promotion){
-		printk("promote success nr %d", nr_succeeded);
+		// printk("promote success nr %d", nr_succeeded);
 		count_vm_events(HTMM_NR_PROMOTED, nr_succeeded);
 	}
     else

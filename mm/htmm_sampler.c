@@ -27,16 +27,25 @@ static bool valid_va(unsigned long addr)
 static __u64 get_pebs_event(enum events e)
 { //主要是这些peb事件还不能理解; 因为原来这个效果不错，应该啊保留也没问题
     switch (e) { 
-	case LLC_MISS_PERF:
-		return PERF_COUNT_HW_CACHE_MISSES; //怀疑这个不行，没法得到地址
-	// case DRAMREAD:
-	//     return DRAM_LLC_LOAD_MISS;
-	// case NVMREAD:
-	// 	return NVM_LLC_LOAD_MISS;
-	case LLC_MISS:
-		return LLC_MISS_DIF1;
+	// case LLC_MISS_PERF:
+	// 	return PERF_COUNT_HW_CACHE_MISSES; 
+	// case LLC_MISS:
+	// 	return LLC_MISS_DIF1;
+	
+	case DRAMREAD:
+	    return DRAM_LLC_LOAD_MISS;
+	case NVMREAD:
+	    if (!htmm_cxl_mode)
+		return NVM_LLC_LOAD_MISS;
+	    else
+		return N_HTMMEVENTS;
 	case MEMWRITE:
 	    return ALL_STORES;
+	case CXLREAD:
+	    if (htmm_cxl_mode)
+		return REMOTE_DRAM_LLC_LOAD_MISS;
+	    else
+		return N_HTMMEVENTS;
 	default:
 	    return N_HTMMEVENTS;
     }
@@ -63,7 +72,7 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     attr.config = config; //要监测的采样事件
     attr.config1 = config1;
 
-	attr.sample_period = 10007;
+	attr.sample_period = 30007;
 
     attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR;
     attr.disabled = 0;
@@ -235,8 +244,14 @@ static int ksamplingd(void *data)
 			    			
 			    			break;
 						case PERF_RECORD_THROTTLE:
+							printk("one sample case PERF_RECORD_THROTTLE");
+							break;
 						case PERF_RECORD_UNTHROTTLE:
+							printk("one sample case PERF_RECORD_UNTHROTTLE");
+							break;
 						case PERF_RECORD_LOST_SAMPLES:
+							printk("one sample case PERF_RECORD_SAMPLES");
+							break;
 						default:
 			    			break;
 		    		}
@@ -247,7 +262,7 @@ static int ksamplingd(void *data)
 	    	}
 		}	
 
-		printk("one sample finished");
+		
 		hit_dram = next_hit_dram;
 		hit_pm = next_hit_pm;
 		if(hit_dram == 0){

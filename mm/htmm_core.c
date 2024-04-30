@@ -343,7 +343,7 @@ static void update_base_page(struct vm_area_struct *vma,
     // prev_idx = get_idx(prev_accessed); //所在bins的位置
     // cur_idx = get_idx(pginfo->nr_accesses); //我可以用这个来提升在lru两部分的移动吧
 
-    if(pginfo->nr_accesses >= 2){ //小页面元数据*512，12; 不乘以元数据后，采样本身就表示频率比较高，试试门槛为被采样到2次
+    if(pginfo->nr_accesses >= 1){ //小页面元数据*512，12; 不乘以元数据后，采样本身就表示频率比较高，试试门槛为被采样到2次(2次效果不行，感觉被采样到就不容易了，试试都迁移走)
         hot = true;
     }else{
         hot = false;
@@ -391,16 +391,16 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
     /*subpage 更新子页面的标识 删了*/
 
     /* hugepage */
-    prev_idx = meta_page->idx;
-    cur_idx = meta_page->total_accesses;
-    cur_idx = get_idx(cur_idx);
-    meta_page->idx = cur_idx;
+    // prev_idx = meta_page->idx;
+    // cur_idx = meta_page->total_accesses;
+    // cur_idx = get_idx(cur_idx);
+    // meta_page->idx = cur_idx;
 
     if (pg_split)
 	return;
 
     // hot = cur_idx >= memcg->active_threshold;
-    if(cur_idx >= 3){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
+    if(meta_page->total_accesses >= 6){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
        hot = true;
     }else{
         hot = false;
@@ -413,8 +413,8 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
     // }
     
     if (hot && !PageActive(page)){
-         meta_page->total_accesses = meta_page->total_accesses >> 1;
-         meta_page->idx -= 1; 
+        //  meta_page->total_accesses = meta_page->total_accesses >> 1;
+        //  meta_page->idx -= 1; 
          move_page_to_active_lru(page);
     }
     // else if (PageActive(page)){

@@ -93,14 +93,12 @@ struct htmm_event {
 };
 
 enum events {
-    // DRAMREAD = 0,
-    // NVMREAD = 1,
-    MEMWRITE = 0,
-    // TLB_MISS_LOADS = 3,
-    // TLB_MISS_STORES = 4,
-    LLC_MISS_PERF = 1,
-    LLC_MISS = 2,
-    // CXLREAD = 5, // emulated by remote DRAM node
+    DRAMREAD = 0,
+    NVMREAD = 1,
+    MEMWRITE = 2,
+    TLB_MISS_LOADS = 3,
+    TLB_MISS_STORES = 4,
+    CXLREAD = 5, // emulated by remote DRAM node
     N_HTMMEVENTS
 };
 
