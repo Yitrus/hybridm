@@ -72,7 +72,7 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     attr.config = config; //要监测的采样事件
     attr.config1 = config1;
 
-	attr.sample_period = 30007;
+	attr.sample_period = 19997;
 
     attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR;
     attr.disabled = 0;

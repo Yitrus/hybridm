@@ -400,7 +400,7 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
 	return;
 
     // hot = cur_idx >= memcg->active_threshold;
-    if(meta_page->total_accesses >= 6){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
+    if(meta_page->total_accesses >= 8){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
        hot = true;
     }else{
         hot = false;
