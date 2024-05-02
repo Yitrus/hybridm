@@ -127,6 +127,11 @@ extern void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg);
 extern void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 extern void charge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 
+extern void set_hit_dram(void);
+extern unsigned long get_hit_dram(void);
+extern void set_hit_pm(void);
+extern unsigned long get_hit_pm(void);
+
 /* htmm_sampler.c */
 extern int ksamplingd_init(pid_t pid, int node);
 extern void ksamplingd_exit(void);

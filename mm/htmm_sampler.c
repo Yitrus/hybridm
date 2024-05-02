@@ -190,6 +190,14 @@ unsigned long hit_pm = 0;
 unsigned long hit_other = 0;
 unsigned long next_hit_dram = 0;
 unsigned long next_hit_pm = 0;
+
+// EXPORT_SYMBOL(hit_ratio);
+// EXPORT_SYMBOL(hit_dram);
+// EXPORT_SYMBOL(hit_pm);
+// EXPORT_SYMBOL(hit_other);
+// EXPORT_SYMBOL(next_hit_dram);
+// EXPORT_SYMBOL(next_hit_pm);
+
 static int ksamplingd(void *data)
 {
 	unsigned long sleep_timeout;
@@ -225,8 +233,6 @@ static int ksamplingd(void *data)
 			continue;
 		}
 	
-		// next_hit_dram = 0;
-		// next_hit_pm = 0;
 		for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 			for (event = 0; event < N_HTMMEVENTS; event++) {
 				//处理某个cpu的某个事件的采样缓冲区数据
@@ -316,9 +322,15 @@ static int ksamplingd(void *data)
 	    	}
 		}	
 
-		if(next_hit_dram!=0 || next_hit_pm!=0){
-			hit_dram = next_hit_dram;
-			hit_pm = next_hit_pm;
+		printk("next_hit_dram %lu", get_hit_dram());
+		printk("next_hit_pm %lu", get_hit_pm());
+		// if(next_hit_dram!=0 || next_hit_pm!=0){
+			hit_dram = get_hit_dram();
+			hit_pm = get_hit_pm();
+
+			// printk("hit_dram %lu", hit_dram);
+			// printk("hit_pm %lu", hit_pm);
+
 			if(hit_dram == 0){
 				hit_ratio = 0;
 			}else if(hit_pm == 0){
@@ -326,9 +338,10 @@ static int ksamplingd(void *data)
 			}else{
 				hit_ratio = (hit_dram*100 / (hit_dram + hit_pm));
 			}
+
 			next_hit_dram = 0;
 			next_hit_pm = 0;
-		}
+		// }
 		
 		/* if ksampled_soft_cpu_quota is zero, disable dynamic pebs feature */
 		if (!ksampled_soft_cpu_quota)
@@ -378,7 +391,7 @@ static int ksamplingd(void *data)
 			trace_cputime = jiffies_to_usecs(cur - trace_cputime);
 			trace_cputime = div64_u64(trace_runtime, trace_cputime);
 				
-			trace_printk("sample_period: %lu || cputime: %lu  || hit ratio: %d\n",get_sample_period(sample_period), trace_cputime, hit_ratio);
+			// trace_printk("sample_period: %lu || cputime: %lu  || hit ratio: %d\n",get_sample_period(sample_period), trace_cputime, hit_ratio);
 				
 			trace_cputime = cur;
 			trace_runtime = cur_runtime;
