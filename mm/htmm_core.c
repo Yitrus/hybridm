@@ -400,7 +400,7 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
 	return;
 
     // hot = cur_idx >= memcg->active_threshold;
-    if(meta_page->total_accesses >= 8){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
+    if(meta_page->total_accesses >= 7){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
        hot = true;
     }else{
         hot = false;
@@ -459,6 +459,9 @@ static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
     // hit_total += 1;
     if(tmp_addr <= DRAM_ADDR_END){
         next_hit_dram += 1;
+        if(next_hit_dram%10==1){
+            printk("next_hit_dram %lu", next_hit_dram);
+        }
     }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
         next_hit_pm += 1;
     }else{
@@ -509,6 +512,7 @@ static int __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
 	    return ret;
     }
 
+    printk("begin update get address");
     pmdval = *pmd;
     if (pmd_trans_huge(pmdval) || pmd_devmap(pmdval)) {
         struct page *page;

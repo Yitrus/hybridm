@@ -72,7 +72,11 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     attr.config = config; //要监测的采样事件
     attr.config1 = config1;
 
-	attr.sample_period = 19997;
+	// attr.sample_period = 19997;
+	if (config == ALL_STORES)
+		attr.sample_period = htmm_inst_sample_period;
+    else
+		attr.sample_period = get_sample_period(0);
 
     attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR;
     attr.disabled = 0;
@@ -118,7 +122,9 @@ static int pebs_init(pid_t pid, int node)
 			mem_event[cpu][event] = NULL;
 			continue;
 	    }
-		
+
+		printk("the pid we sample: %d", pid);
+
 	    if (__perf_event_open(get_pebs_event(event), 0, cpu, event, pid)){
 			printk("pebs_init __perf_event_open failed %d event", event);
 			return -1;
@@ -147,6 +153,36 @@ static void pebs_disable(void)
 	printk("-----------pebs disable finish-----------");
 }
 
+static void pebs_update_period(uint64_t value, uint64_t inst_value)
+{
+    int cpu, event;
+
+    for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
+	for (event = 0; event < N_HTMMEVENTS; event++) {
+	    int ret;
+	    if (!mem_event[cpu][event])
+		continue;
+
+	    switch (event) {
+		case DRAMREAD:
+		case NVMREAD:
+		case CXLREAD:
+		    ret = perf_event_period(mem_event[cpu][event], value);
+		    break;
+		case MEMWRITE:
+		    ret = perf_event_period(mem_event[cpu][event], inst_value);
+		    break;
+		default:
+		    ret = 0;
+		    break;
+	    }
+
+	    if (ret == -EINVAL)
+		printk("failed to update sample period");
+	}
+    }
+}
+
 unsigned int hit_ratio = 0;
 // unsigned long long hit_total = 0;
 unsigned long hit_dram = 0;
@@ -157,8 +193,25 @@ unsigned long next_hit_pm = 0;
 static int ksamplingd(void *data)
 {
 	unsigned long sleep_timeout;
+	/* used for calculating average cpu usage of ksampled */
+    struct task_struct *t = current; // 通过 current 宏获取到的 task_struct 结构体指针代表了当前正在执行的进程
+    /* a unit of cputime: permil (1/1000) */
+    u64 total_runtime, exec_runtime, cputime = 0;
+    unsigned long total_cputime, elapsed_cputime, cur;
+    /* used for periodic checks*/
+    unsigned long cpucap_period = msecs_to_jiffies(15000); // 15s
+    unsigned long sample_period = 0;
+    unsigned long sample_inst_period = 0;
+    /* report cpu/period stat */
+    unsigned long trace_cputime, trace_period = msecs_to_jiffies(1500); // 3s
+    unsigned long trace_runtime;
 
-	sleep_timeout = msecs_to_jiffies(15000); //毫秒和秒是1000
+	 /* orig impl: see read_sum_exec_runtime() */
+    trace_runtime = total_runtime = exec_runtime = t->se.sum_exec_runtime;
+
+    trace_cputime = total_cputime = elapsed_cputime = jiffies;
+    sleep_timeout = usecs_to_jiffies(2000); //毫秒和秒是1000
+ 
 	
     // const struct cpumask *cpumask = cpumask_of_node(0);
     // if (!cpumask_empty(cpumask))
@@ -172,8 +225,8 @@ static int ksamplingd(void *data)
 			continue;
 		}
 	
-		next_hit_dram = 0;
-		next_hit_pm = 0;
+		// next_hit_dram = 0;
+		// next_hit_pm = 0;
 		for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 			for (event = 0; event < N_HTMMEVENTS; event++) {
 				//处理某个cpu的某个事件的采样缓冲区数据
@@ -236,7 +289,7 @@ static int ksamplingd(void *data)
 						// 性能采样数据。应该一般都是这个状态，我看模板也是从这里拿的
 						case PERF_RECORD_SAMPLE:
 							he = (struct htmm_event *)ph;
-							 if (!valid_va(he->addr)) {
+							if (!valid_va(he->addr)) {
 								break;
 			    			}
 
@@ -253,6 +306,7 @@ static int ksamplingd(void *data)
 							printk("one sample case PERF_RECORD_SAMPLES");
 							break;
 						default:
+							printk("what means default");
 			    			break;
 		    		}
 		    		/* read, write barrier */
@@ -262,25 +316,79 @@ static int ksamplingd(void *data)
 	    	}
 		}	
 
-		
-		hit_dram = next_hit_dram;
-		hit_pm = next_hit_pm;
-		if(hit_dram == 0){
-			hit_ratio = 0;
-		}else if(hit_pm == 0){
-			hit_ratio = 100;
-		}else{
-			hit_ratio = (hit_dram*100 / (hit_dram + hit_pm));
+		if(next_hit_dram!=0 || next_hit_pm!=0){
+			hit_dram = next_hit_dram;
+			hit_pm = next_hit_pm;
+			if(hit_dram == 0){
+				hit_ratio = 0;
+			}else if(hit_pm == 0){
+				hit_ratio = 100;
+			}else{
+				hit_ratio = (hit_dram*100 / (hit_dram + hit_pm));
+			}
+			next_hit_dram = 0;
+			next_hit_pm = 0;
 		}
 		
 		/* if ksampled_soft_cpu_quota is zero, disable dynamic pebs feature */
-		// if (!ksampled_soft_cpu_quota)
-		// 	continue;
+		if (!ksampled_soft_cpu_quota)
+	    continue;
 
 		/* sleep 这确实是while中线程需要循环做的事情，
 		然后每次执行后需要休眠如果原本的定义不行可以采用msleep_interruptible(2000);*/
 		schedule_timeout_interruptible(sleep_timeout);
-    } 
+
+		/* check elasped time */
+		cur = jiffies; // 是Linux内核中用于表示时间的基本单位
+		if ((cur - elapsed_cputime) >= cpucap_period) { // 计算了两次采样之间的时间差，如果这个时间差超过了cpucap_perio 15s
+	    	u64 cur_runtime = t->se.sum_exec_runtime;
+	    	exec_runtime = cur_runtime - exec_runtime; //ns 得到上一轮采样的执行时间
+	    	elapsed_cputime = jiffies_to_usecs(cur - elapsed_cputime); //us 两次采样时间差
+	    	if (!cputime) { //如果是第一次计算CPU的使用率
+				// 将两次采样之间的执行时间除以两次采样之间的经过时间，计算出 CPU 使用率的初步值。这个值表示在两次采样之间，CPU 的平均使用率。
+				u64 cur_cputime = div64_u64(exec_runtime, elapsed_cputime); 
+				// EMA with the scale factor (0.2) 使用指数移动平均值（EMA）算法，以一个固定的比例（这里是 0.2）将当前的 CPU 使用率和之前的 CPU 使用率进行加权平均。这样可以平滑地计算 CPU 使用率，并减少抖动。
+				cputime = ((cur_cputime << 3) + (cputime << 1)) / 10;
+	    	} else
+				cputime = div64_u64(exec_runtime, elapsed_cputime);
+
+	    	/* to prevent frequent updates, allow for a slight variation of +/- 0.5% */
+	    	if (cputime > (ksampled_soft_cpu_quota + 5) && sample_period != pcount) {
+				// 它检查 CPU 使用率是否超过了预设的软 CPU 配额（ksampled_soft_cpu_quota）加上 5，即是否超过了软配额的 0.5%。如果是，并且当前的采样周期不等于 pcount，则需要增加采样周期
+				/* only increase by 1 */
+				unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
+				increase_sample_period(&sample_period, &sample_inst_period);
+				if (tmp1 != sample_period || tmp2 != sample_inst_period)
+					pebs_update_period(get_sample_period(sample_period),get_sample_inst_period(sample_inst_period));
+			} else if (cputime < (ksampled_soft_cpu_quota - 5) && sample_period) {
+				unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
+				decrease_sample_period(&sample_period, &sample_inst_period);
+				if (tmp1 != sample_period || tmp2 != sample_inst_period)
+						pebs_update_period(get_sample_period(sample_period),get_sample_inst_period(sample_inst_period));
+			}
+			/* does it need to prevent ping-pong behavior? */
+			elapsed_cputime = cur;
+			exec_runtime = cur_runtime;
+		}
+
+		/* This is used for reporting the sample period and cputime */
+		if (cur - trace_cputime >= trace_period) {
+			u64 cur_runtime = t->se.sum_exec_runtime;
+			trace_runtime = cur_runtime - trace_runtime;
+			trace_cputime = jiffies_to_usecs(cur - trace_cputime);
+			trace_cputime = div64_u64(trace_runtime, trace_cputime);
+				
+			trace_printk("sample_period: %lu || cputime: %lu  || hit ratio: %d\n",get_sample_period(sample_period), trace_cputime, hit_ratio);
+				
+			trace_cputime = cur;
+			trace_runtime = cur_runtime;
+		}
+    }
+
+    total_runtime = (t->se.sum_exec_runtime) - total_runtime; // ns
+    total_cputime = jiffies_to_usecs(jiffies - total_cputime); // us
+
+    printk("total runtime: %llu ns, total cputime: %lu us, cpu usage: %llu\n", total_runtime, total_cputime, (total_runtime) / total_cputime);
 
     return 0;
 }

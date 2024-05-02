@@ -1,69 +1,10 @@
 # TODO:
-24. 会有很长的时间段，采样不到任何东西？ratio 0 others 0 dram 0 pm 0 应该是系统负载高了的原因或者采样频率小了。而热度阈值和采样频繁程度也是挂钩的
-25. 还要处理系统负载高时，采样开销和准确度的影响
+25. 会有很长的时间段，采样不到任何东西？ratio 0 others 0 dram 0 pm 0 应该是系统负载高了的原因或者采样频率小了。而热度阈值和采样频繁程度也是挂钩的
+26. 还要处理系统负载高时，采样开销和准确度的影响（这是相互的，不应该让步）
 
 # Problem：
-再次启动时内核崩溃, 这问题时有时无(可能是清空缓存命令造成的)。
+再次启动时内核崩溃, 这问题时有时无(可能是清空缓存命令造成的echo 3 > /proc/sys/vm/drop_caches)。
 
 # 获取状态
 next_promotion_node，升级去的节点，找到对应DRAM节点；
 next_demotion_node，降级去的节点，找到对应PM节点
-
-
-
-## 1.1 浮点数的状态
-浮点性能参考指标 (xFLOPS) = 总运算核心数 x 每周期运算次数 x 处理器相对运作频率（ 384 Core x 4 x 800 MHz(0.8 GHz)）
-所有 60 个内核都可以以 16 次/时钟的速率执行双精度浮点数学。
-以下是英特尔至强融核 5110 的峰值理论浮点数学：
-GFLOPS = 60 cores/Phi * 1.053 GHz/core * 16 GFLOPs/GHz=1,010.8 = 一个CPU核的数量*每秒多少时钟周期*每周期浮点数运算次数
-
-### （1）获取cpu当前的实时频率
-在系统进行cpu性能测试主要是linpack测试的过程中执行该脚本，该脚本会自动获取当前的cpu频率；
-F=`cat/proc/cpuinfo|grep-iMHz|awk'{print$4}'|head-n1`
-### （2）脚本自动获取系统下cpu的总核心数
-N=`cat/proc/cpuinfo|grep-iprocessor|wc–l`
-### （3）获取当前cpu每周期的浮点运算次数并计算理论值
-```
-cat/proc/cpuinfo|grep-iavx2
-if[$?-eq0];then
-Flops=`echo“$F*$N*16”|bc`
-else
-Flops=`echo“$F*$N*8”|bc`
-fi
-```
-### （4）显示CPU型号，系统下的核心数，当前频率和浮点运算理论值
-```
-cat/proc/cpuinfo|grep“modelname”|head–n1
-echo“CPUFreqis$F”
-echo“CPUCoresare$N”
-echo“Flopsis$FlopsMFlops”。
-```
-
-## 1.2内存带宽的状态
-### 22FAST 
-MT平方
-
-### 脚本自动获取内存channel总数和内存当前频率
-手动输入单cpu下内存channel数，脚本会读取该数据为之后计算做准备。
-A.脚本会自动获取当前系统的cpu总数：
-cpu_num=`cat/proc/cpuinfo|grep-i"physicalid"|awk'{print$4}'|tail-1`
-B.然后获取内存的当前频率：
-speed=`dmidecode-tmemory|grep-i'configuredclockspeed'|awk'{print$4}'|head-1`
-最后根据这些信息计算出内存的理论带宽值。
-
-内存带宽的计算公式是：带宽=内存核心频率×内存总线位数×倍增系数。简化公式为：标称频率*位数。比如一条DDR3 1333MHz 64bit的内存，理论带宽为：1333*64/8=10664MiB/s = 10.6GiB/s。
-
-例如DDR266的频率即为266MHz,根据内存带宽的算法:带宽=总线位宽/8x1个时钟周期内交换的数据包个数*总线频率，DDR266的带宽= 64/8x2x133=2128,它的传输带宽为2.1GB/s，因此DDR266又俗称为PC2100，这里的2100就是指其内存带宽约为2100MB。https://blog.51cto.com/zhangheng/941012
-
-### perf
-sudo perf stat -a -e uncore_imc/data_reads/
-
-### mbw工具
-ubuntu下已经可以直接安装使用
-无须下载源码编译https://www.cnblogs.com/sunshine-blog/p/11903842.html。安装命令：apt-get install mbw
-常用命令：mbw -q -n 10 256
--n 10表示运行10次，256表示测试所用的内存大小，单位为MB。
-mbw测试了MEMCPY、DUMB、MCBLOCK等方式的内存带宽。从测试结果看，前2都差不多，最后一种测试得到的带宽值比较高
-
-### python算内存带宽
-https://www.volcengine.com/theme/7266637-B-7-1

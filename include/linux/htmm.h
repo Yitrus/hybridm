@@ -127,6 +127,7 @@ extern void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg);
 extern void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 extern void charge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 
+/* htmm_sampler.c */
 extern int ksamplingd_init(pid_t pid, int node);
 extern void ksamplingd_exit(void);
 extern unsigned int hit_ratio;
@@ -136,6 +137,68 @@ extern unsigned long hit_other;
 // extern unsigned long long hit_total;
 extern unsigned long next_hit_dram;
 extern unsigned long next_hit_pm;
+
+static inline unsigned long get_sample_period(unsigned long cur) {
+    if (cur < 0)
+	return 0;
+    else if (cur < pcount)
+	return pebs_period_list[cur];
+    else
+	return pebs_period_list[pcount - 1];
+}
+
+static inline unsigned long get_sample_inst_period(unsigned long cur) {
+    if (cur < 0)
+	return 0;
+    else if (cur < pinstcount)
+	return pebs_inst_period_list[cur];
+    else
+	return pebs_inst_period_list[pinstcount - 1];
+}
+#if 1
+static inline void increase_sample_period(unsigned long *llc_period,
+					  unsigned long *inst_period) {
+    unsigned long p;
+    p = *llc_period;
+    if (++p < pcount)
+	*llc_period = p;
+    
+    p = *inst_period;
+    if (++p < pinstcount)
+	*inst_period = p;
+}
+
+static inline void decrease_sample_period(unsigned long *llc_period,
+					  unsigned long *inst_period) {
+    unsigned long p;
+    p = *llc_period;
+    if (p > 0)
+	*llc_period = p - 1;
+    
+    p = *inst_period;
+    if (p > 0)
+	*inst_period = p - 1;
+}
+#else
+static inline unsigned int increase_sample_period(unsigned int cur,
+						  unsigned int next) {
+    do {
+	cur++;
+    } while (pebs_period_list[cur] < next && cur < pcount);
+    
+    return cur < pcount ? cur : pcount - 1;
+}
+
+static inline unsigned int decrease_sample_period(unsigned int cur,
+						  unsigned int next) {
+    do {
+	cur--;
+    } while (pebs_period_list[cur] > next && cur > 0);
+    
+    return cur;
+}
+#endif
+
 
 /* htmm_migrater.c */
 #define HTMM_MIN_FREE_PAGES 256 * 10 // 10MB
