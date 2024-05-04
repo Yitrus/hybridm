@@ -7595,7 +7595,8 @@ subsys_initcall(mem_cgroup_htmm_init);
 
 static int hit_ratio_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "%d %lu %lu %lu \n", hit_ratio, hit_other,hit_dram, hit_pm);
+	// seq_printf(m, "%d %lu %lu %lu \n", hit_ratio, get_hit_other(),hit_dram, hit_pm);
+	seq_printf(m, "%d %d %d \n", hit_ratio, hit_dram, hit_pm);
     return 0;
 }
 

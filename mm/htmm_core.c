@@ -425,22 +425,6 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
     // }
 }
 
-void set_hit_dram(){
-    next_hit_dram += 1;
-}
-
-unsigned long get_hit_dram(){
-    return next_hit_dram;
-}
-
-void set_hit_pm(){
-    next_hit_pm += 1;
-}
-
-unsigned long get_hit_pm(){
-    return next_hit_pm;
-}
-
 static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
 				unsigned long address)
 {
@@ -475,16 +459,16 @@ static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
     // hit_total += 1;
     if(tmp_addr <= DRAM_ADDR_END){
         set_hit_dram();
-        if(next_hit_dram%17==1){
-            trace_printk("pte_next_hit_dram %lu \n", get_hit_dram());
+        if(get_hit_dram()%17==1){
+            trace_printk("pte_next_hit_dram %d \n", get_hit_dram());
         }
     }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
         set_hit_pm();
-        if(next_hit_pm%17==1){
-            trace_printk("pte_next_pm_pm %lu \n", get_hit_pm());
+        if(get_hit_pm()%17==1){
+            trace_printk("pte_next_pm_pm %d \n", get_hit_pm());
         }
     }else{
-        hit_other += 1;
+        set_hit_other();
     }
 
     update_base_page(vma, page, pginfo);
@@ -555,16 +539,16 @@ static int __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
         // hit_total += 1;
         if(tmp_addr <= DRAM_ADDR_END){
             set_hit_dram();
-            if(next_hit_dram%17==1){
-                trace_printk("pmd_next_hit_dram %lu \n", get_hit_dram());
+            if(get_hit_dram()%17==1){
+                trace_printk("pmd_next_hit_dram %d \n", get_hit_dram());
             }
         }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
             set_hit_pm();
-            if(next_hit_pm%17==1){
-                trace_printk("pmd_next_pm_pm %lu \n", get_hit_pm());
+            if(get_hit_pm()%17==1){
+                trace_printk("pmd_next_pm_pm %d \n", get_hit_pm());
             }
         }else{
-            hit_other += 1;
+            set_hit_other();
         }
 
         update_huge_page(vma, pmd, page, address);

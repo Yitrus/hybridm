@@ -185,18 +185,41 @@ static void pebs_update_period(uint64_t value, uint64_t inst_value)
 
 unsigned int hit_ratio = 0;
 // unsigned long long hit_total = 0;
-unsigned long hit_dram = 0;
-unsigned long hit_pm = 0;
-unsigned long hit_other = 0;
-unsigned long next_hit_dram = 0;
-unsigned long next_hit_pm = 0;
+unsigned int hit_dram = 0;
+unsigned int hit_pm = 0;
+unsigned int *hit_other = NULL;
+unsigned int *next_hit_dram = NULL;
+unsigned int *next_hit_pm = NULL;
 
-// EXPORT_SYMBOL(hit_ratio);
-// EXPORT_SYMBOL(hit_dram);
-// EXPORT_SYMBOL(hit_pm);
-// EXPORT_SYMBOL(hit_other);
-// EXPORT_SYMBOL(next_hit_dram);
-// EXPORT_SYMBOL(next_hit_pm);
+void set_hit_dram(){
+    unsigned int tmp = get_hit_dram();
+    tmp += 1;
+	*next_hit_dram = tmp;
+}
+
+unsigned int get_hit_dram(){
+    return *next_hit_dram;
+}
+
+void set_hit_pm(){
+	unsigned int tmp = get_hit_pm();
+    tmp += 1;
+	*next_hit_pm = tmp;
+}
+
+unsigned int get_hit_pm(){
+    return *next_hit_pm;
+}
+
+void set_hit_other(){
+    unsigned int tmp = get_hit_other();
+    tmp += 1;
+	*hit_other = tmp;
+}
+
+unsigned int get_hit_other(){
+    return *hit_other;
+}
 
 static int ksamplingd(void *data)
 {
@@ -220,7 +243,10 @@ static int ksamplingd(void *data)
     trace_cputime = total_cputime = elapsed_cputime = jiffies;
     sleep_timeout = usecs_to_jiffies(2000); //毫秒和秒是1000
  
-	
+	next_hit_dram = kmalloc(sizeof(unsigned int), GFP_KERNEL);
+	next_hit_pm = kmalloc(sizeof(unsigned int), GFP_KERNEL);
+	hit_other = kmalloc(sizeof(unsigned int), GFP_KERNEL);
+
     // const struct cpumask *cpumask = cpumask_of_node(0);
     // if (!cpumask_empty(cpumask))
 	// 	do_set_cpus_allowed(access_sampling, cpumask);
@@ -322,8 +348,8 @@ static int ksamplingd(void *data)
 	    	}
 		}	
 
-		printk("next_hit_dram %lu", get_hit_dram());
-		printk("next_hit_pm %lu", get_hit_pm());
+		printk("next_hit_dram %d", get_hit_dram());
+		printk("next_hit_pm %d", get_hit_pm());
 		// if(next_hit_dram!=0 || next_hit_pm!=0){
 			hit_dram = get_hit_dram();
 			hit_pm = get_hit_pm();
