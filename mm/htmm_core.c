@@ -456,19 +456,18 @@ static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
 	goto pte_unlock;
 
     tmp_addr = page_to_phys(page);
-    // hit_total += 1;
     if(tmp_addr <= DRAM_ADDR_END){
-        set_hit_dram();
-        if(get_hit_dram()%17==1){
-            trace_printk("pte_next_hit_dram %d \n", get_hit_dram());
-        }
+        atomic_inc(&hit_dram);
+        // if(atomic_read(&next_hit_dram)%17==1){
+        //     trace_printk("pmd_next_hit_dram %d \n", atomic_read(&next_hit_dram));
+        // }
     }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
-        set_hit_pm();
-        if(get_hit_pm()%17==1){
-            trace_printk("pte_next_pm_pm %d \n", get_hit_pm());
-        }
+        atomic_inc(&hit_pm);
+        // if(atomic_read(&next_hit_pm)%17==1){
+        //     trace_printk("pmd_next_pm_pm %d \n", atomic_read(&next_hit_pm));
+        // }
     }else{
-        set_hit_other();
+        atomic_inc(&hit_other);
     }
 
     update_base_page(vma, page, pginfo);
@@ -538,17 +537,17 @@ static int __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
         tmp_addr = page_to_phys(page);
         // hit_total += 1;
         if(tmp_addr <= DRAM_ADDR_END){
-            set_hit_dram();
-            if(get_hit_dram()%17==1){
-                trace_printk("pmd_next_hit_dram %d \n", get_hit_dram());
-            }
+            atomic_inc(&hit_dram);
+            // if(atomic_read(&next_hit_dram)%17==1){
+            //     trace_printk("pmd_next_hit_dram %d \n", atomic_read(&next_hit_dram));
+            // }
         }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
-            set_hit_pm();
-            if(get_hit_pm()%17==1){
-                trace_printk("pmd_next_pm_pm %d \n", get_hit_pm());
-            }
+            atomic_inc(&hit_pm);
+            // if(atomic_read(&next_hit_pm)%17==1){
+            //     trace_printk("pmd_next_pm_pm %d \n", atomic_read(&next_hit_pm));
+            // }
         }else{
-            set_hit_other();
+            atomic_inc(&hit_other);
         }
 
         update_huge_page(vma, pmd, page, address);

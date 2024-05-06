@@ -130,19 +130,10 @@ extern void charge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 /* htmm_sampler.c */
 extern int ksamplingd_init(pid_t pid, int node);
 extern void ksamplingd_exit(void);
-extern unsigned int hit_ratio;
-extern unsigned int hit_dram;
-extern unsigned int hit_pm;
-extern unsigned int *hit_other;
-extern unsigned int *next_hit_dram;
-extern unsigned int *next_hit_pm;
 
-extern void set_hit_dram(void);
-extern unsigned int get_hit_dram(void);
-extern void set_hit_pm(void);
-extern unsigned int get_hit_pm(void);
-extern void set_hit_other(void);
-extern unsigned int get_hit_other(void);
+extern atomic_t hit_dram;
+extern atomic_t hit_pm;
+extern atomic_t hit_other;
 
 static inline unsigned long get_sample_period(unsigned long cur) {
     if (cur < 0)

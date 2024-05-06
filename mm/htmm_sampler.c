@@ -183,43 +183,10 @@ static void pebs_update_period(uint64_t value, uint64_t inst_value)
     }
 }
 
-unsigned int hit_ratio = 0;
-// unsigned long long hit_total = 0;
-unsigned int hit_dram = 0;
-unsigned int hit_pm = 0;
-unsigned int *hit_other = NULL;
-unsigned int *next_hit_dram = NULL;
-unsigned int *next_hit_pm = NULL;
-
-void set_hit_dram(){
-    unsigned int tmp = get_hit_dram();
-    tmp += 1;
-	*next_hit_dram = tmp;
-}
-
-unsigned int get_hit_dram(){
-    return *next_hit_dram;
-}
-
-void set_hit_pm(){
-	unsigned int tmp = get_hit_pm();
-    tmp += 1;
-	*next_hit_pm = tmp;
-}
-
-unsigned int get_hit_pm(){
-    return *next_hit_pm;
-}
-
-void set_hit_other(){
-    unsigned int tmp = get_hit_other();
-    tmp += 1;
-	*hit_other = tmp;
-}
-
-unsigned int get_hit_other(){
-    return *hit_other;
-}
+//原子变量
+atomic_t hit_dram = ATOMIC_INIT(0);
+atomic_t hit_pm = ATOMIC_INIT(0);
+atomic_t hit_other = ATOMIC_INIT(0);
 
 static int ksamplingd(void *data)
 {
@@ -242,23 +209,17 @@ static int ksamplingd(void *data)
 
     trace_cputime = total_cputime = elapsed_cputime = jiffies;
     sleep_timeout = usecs_to_jiffies(2000); //毫秒和秒是1000
- 
-	next_hit_dram = kmalloc(sizeof(unsigned int), GFP_KERNEL);
-	next_hit_pm = kmalloc(sizeof(unsigned int), GFP_KERNEL);
-	hit_other = kmalloc(sizeof(unsigned int), GFP_KERNEL);
-
-    // const struct cpumask *cpumask = cpumask_of_node(0);
-    // if (!cpumask_empty(cpumask))
-	// 	do_set_cpus_allowed(access_sampling, cpumask);
 
     while (!kthread_should_stop()) {
 		int cpu, event, cond = false;
     
 		if (htmm_mode == HTMM_NO_MIG) {
+			printk("HTMM_NO_MIG waiting for sample");
 			msleep_interruptible(10000);
 			continue;
 		}
 	
+		// trace_printk("--------for double--------");
 		for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 			for (event = 0; event < N_HTMMEVENTS; event++) {
 				//处理某个cpu的某个事件的采样缓冲区数据
@@ -326,6 +287,9 @@ static int ksamplingd(void *data)
 			    			}
 
 							update_pginfo(he->pid, he->addr, event);
+							//TODO：这里打印确定是不是函数内部返回的就不是同一个参数。
+							// printk("next_hit_dram %d", atomic_read(&next_hit_dram));
+							// printk("next_hit_pm %d", atomic_read(&next_hit_pm));
 			    			
 			    			break;
 						case PERF_RECORD_THROTTLE:
@@ -344,34 +308,37 @@ static int ksamplingd(void *data)
 		    		/* read, write barrier */
 		    		smp_mb();
 		    		WRITE_ONCE(up->data_tail, up->data_tail + ph->size);
-				} while (cond);
+				} while (cond);	
 	    	}
 		}	
 
-		printk("next_hit_dram %d", get_hit_dram());
-		printk("next_hit_pm %d", get_hit_pm());
+		//TODO：这里打印可能有其他的跳出循环的问题。
+		
 		// if(next_hit_dram!=0 || next_hit_pm!=0){
-			hit_dram = get_hit_dram();
-			hit_pm = get_hit_pm();
-
+			
+			// atomic_add(atomic_read(&next_hit_dram), &hit_dram);
+			// atomic_add(atomic_read(&next_hit_pm), &hit_pm);
 			// printk("hit_dram %lu", hit_dram);
 			// printk("hit_pm %lu", hit_pm);
+		// atomic_set(&hit_dram, atomic_read(&hit_dram));
+		// atomic_set(&hit_pm, atomic_read(&hit_pm));
+		// trace_printk("hit_dram: %d", atomic_read(&hit_dram));
+		// trace_printk("hit_dram: %d", atomic_read(&hit_pm));
+			// if(atomic_read(&hit_dram) == 0){
+			// 	atomic_set(&hit_ratio, 0);
+			// }else if(atomic_read(&hit_dram) == 0){
+			// 	atomic_set(&hit_ratio, 100);
+			// }else{
+			// 	atomic_set(&hit_ratio, atomic_read(&hit_dram)*100 / (atomic_read(&hit_dram) + atomic_read(&hit_pm)));
+			// }
 
-			if(hit_dram == 0){
-				hit_ratio = 0;
-			}else if(hit_pm == 0){
-				hit_ratio = 100;
-			}else{
-				hit_ratio = (hit_dram*100 / (hit_dram + hit_pm));
-			}
-
-			next_hit_dram = 0;
-			next_hit_pm = 0;
+		// atomic_set(&next_hit_dram, 0);
+		// atomic_set(&next_hit_pm, 0);
 		// }
 		
-		/* if ksampled_soft_cpu_quota is zero, disable dynamic pebs feature */
-		if (!ksampled_soft_cpu_quota)
-	    continue;
+		/* if ksampled_soft_cpu_quota is zero, disable dynamic pebs feature 这里应该是cpu消耗是0就不休眠*/
+		// if (!ksampled_soft_cpu_quota)
+	    // continue;
 
 		/* sleep 这确实是while中线程需要循环做的事情，
 		然后每次执行后需要休眠如果原本的定义不行可以采用msleep_interruptible(2000);*/
@@ -417,12 +384,13 @@ static int ksamplingd(void *data)
 			trace_cputime = jiffies_to_usecs(cur - trace_cputime);
 			trace_cputime = div64_u64(trace_runtime, trace_cputime);
 				
-			// trace_printk("sample_period: %lu || cputime: %lu  || hit ratio: %d\n",get_sample_period(sample_period), trace_cputime, hit_ratio);
+			trace_printk("sample_period: %lu || cputime: %lu \n",get_sample_period(sample_period), trace_cputime);
 				
 			trace_cputime = cur;
 			trace_runtime = cur_runtime;
 		}
     }
+
 
     total_runtime = (t->se.sum_exec_runtime) - total_runtime; // ns
     total_cputime = jiffies_to_usecs(jiffies - total_cputime); // us
