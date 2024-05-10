@@ -7598,8 +7598,8 @@ static int hit_ratio_show(struct seq_file *m, void *v)
 	// seq_printf(m, "%d %lu %lu %lu \n", hit_ratio, get_hit_other(),hit_dram, hit_pm);
 	// seq_printf(m, "%d %d %d \n", atomic_read(&hit_ratio), atomic_read(&hit_dram), atomic_read(&hit_pm));
 	seq_printf(m, "%d %d \n", atomic_read(&hit_dram), atomic_read(&hit_pm));
-	atomic_set(&hit_dram, 0);
-	atomic_set(&hit_pm, 0);
+	// atomic_set(&hit_dram, 0);
+	// atomic_set(&hit_pm, 0);
     return 0;
 }
 

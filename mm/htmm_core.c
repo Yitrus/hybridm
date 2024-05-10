@@ -458,14 +458,14 @@ static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
     tmp_addr = page_to_phys(page);
     if(tmp_addr <= DRAM_ADDR_END){
         atomic_inc(&hit_dram);
-        // if(atomic_read(&next_hit_dram)%17==1){
-        //     trace_printk("pmd_next_hit_dram %d \n", atomic_read(&next_hit_dram));
-        // }
+        if(atomic_read(&hit_dram)%17==1){
+            trace_printk("pmd_next_hit_dram %d \n", atomic_read(&hit_dram));
+        }
     }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
         atomic_inc(&hit_pm);
-        // if(atomic_read(&next_hit_pm)%17==1){
-        //     trace_printk("pmd_next_pm_pm %d \n", atomic_read(&next_hit_pm));
-        // }
+        if(atomic_read(&hit_pm)%17==1){
+            trace_printk("pmd_next_pm_pm %d \n", atomic_read(&hit_pm));
+        }
     }else{
         atomic_inc(&hit_other);
     }
@@ -538,14 +538,14 @@ static int __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
         // hit_total += 1;
         if(tmp_addr <= DRAM_ADDR_END){
             atomic_inc(&hit_dram);
-            // if(atomic_read(&next_hit_dram)%17==1){
-            //     trace_printk("pmd_next_hit_dram %d \n", atomic_read(&next_hit_dram));
-            // }
+            if(atomic_read(&hit_dram)%17==1){
+                trace_printk("pmd_next_hit_dram %d \n", atomic_read(&hit_dram));
+            }
         }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
             atomic_inc(&hit_pm);
-            // if(atomic_read(&next_hit_pm)%17==1){
-            //     trace_printk("pmd_next_pm_pm %d \n", atomic_read(&next_hit_pm));
-            // }
+            if(atomic_read(&hit_pm)%17==1){
+                trace_printk("pmd_next_pm_pm %d \n", atomic_read(&hit_pm));
+            }
         }else{
             atomic_inc(&hit_other);
         }

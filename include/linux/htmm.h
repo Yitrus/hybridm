@@ -7,7 +7,7 @@
 
 #define BUFFER_SIZE	32 /* 128: 1MB */
 //edit by 100, ubuntu20那台是旧服务器12个核心一个socket，而新电脑ubuntu18那台是28个核心
-#define CPUS_PER_SOCKET 24
+#define CPUS_PER_SOCKET 28
 #define MAX_MIGRATION_RATE_IN_MBPS  2048 /* 2048MB per sec */
 
 /* 定义判断地址的常量 16进制*/

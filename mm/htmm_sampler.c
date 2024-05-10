@@ -107,6 +107,7 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     return 0;
 }
 
+/* 这里才是每个cpu一个去采样，采样线程在收集数据 */
 static int pebs_init(pid_t pid, int node)
 {
     int cpu, event;
@@ -209,6 +210,11 @@ static int ksamplingd(void *data)
 
     trace_cputime = total_cputime = elapsed_cputime = jiffies;
     sleep_timeout = usecs_to_jiffies(2000); //毫秒和秒是1000
+
+	 /* Currently uses a single CPU node(0) 就是说这个采样指针只允许cpu0的去使用, 进程access_sampling将只能在cpumask中指定的CPU上运行 */
+    const struct cpumask *cpumask = cpumask_of_node(0);
+    if (!cpumask_empty(cpumask))
+		do_set_cpus_allowed(access_sampling, cpumask);
 
     while (!kthread_should_stop()) {
 		int cpu, event, cond = false;
@@ -377,6 +383,8 @@ static int ksamplingd(void *data)
 			exec_runtime = cur_runtime;
 		}
 
+		trace_printk("sample_period: %lu || cputime: %lu \n",get_sample_period(sample_period), trace_cputime);
+
 		/* This is used for reporting the sample period and cputime */
 		if (cur - trace_cputime >= trace_period) {
 			u64 cur_runtime = t->se.sum_exec_runtime;
@@ -384,7 +392,7 @@ static int ksamplingd(void *data)
 			trace_cputime = jiffies_to_usecs(cur - trace_cputime);
 			trace_cputime = div64_u64(trace_runtime, trace_cputime);
 				
-			trace_printk("sample_period: %lu || cputime: %lu \n",get_sample_period(sample_period), trace_cputime);
+			// trace_printk("sample_period: %lu || cputime: %lu \n",get_sample_period(sample_period), trace_cputime);
 				
 			trace_cputime = cur;
 			trace_runtime = cur_runtime;
@@ -405,7 +413,7 @@ static int ksamplingd_run(void)
     int err = 0;
     
     if (!access_sampling) {
-		access_sampling = kthread_run(ksamplingd, NULL, "ksamplingd");
+		access_sampling = kthread_run(ksamplingd, NULL, "ksamplingd"); //这指针就是一个cpu一个了
 		if (IS_ERR(access_sampling)) {
 	    	err = PTR_ERR(access_sampling);
 	    	access_sampling = NULL;
@@ -428,7 +436,7 @@ int ksamplingd_init(pid_t pid, int node)
 		printk("last time ksamplingd exit normally");
 	}
 
-    ret = pebs_init(pid, node); //采样线程从这里就在报错了，应该就是core按照server定义的，多了
+    ret = pebs_init(pid, node); //这里每个cpu已经在采样了
     if (ret) {
 		printk("htmm__perf_event_init failure... ERROR:%d", ret);
 		return 0;
