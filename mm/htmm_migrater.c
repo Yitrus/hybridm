@@ -611,7 +611,7 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
     enum lru_list lru;
     bool shrink_active = false;
 
-	unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
+	// unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
 
     for_each_evictable_lru(lru) {
 		if (!is_file_lru(lru) && is_active_lru(lru))
@@ -655,7 +655,7 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
     enum lru_list lru = LRU_ACTIVE_ANON;
     short priority = DEF_PRIORITY;
 
-	unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
+	// unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
 
 	nr_to_promote = (unsigned long)nr_action;
 
@@ -692,7 +692,7 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
     return nr_promoted;
 }
 
-static struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat)
+struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat)
 {
     struct mem_cgroup_per_node *pn;
 
@@ -880,4 +880,63 @@ int kmigraterd_init(void)
 		kmigraterd_run(nid);
 	}
     return 0;
+}
+
+// 写给采样用的，在htmm_sample里调用, 只针对匿名热页面？
+unsigned long fast_promote(struct list_head *page_list, struct list_head *fast_list,
+	pg_data_t *pgdat)
+{
+    LIST_HEAD(promote_pages);
+    LIST_HEAD(ret_pages);
+    unsigned long nr_promoted = 0;
+
+    cond_resched();
+
+    while (!list_empty(fast_list)) {
+		struct page *page;
+
+		page = lru_to_page(fast_list);
+		list_del(&page->lru);
+	
+		if (!trylock_page(page)){
+			printk("locked!");
+			goto __keep;
+		}
+		//if (!PageActive(page) && htmm_mode != HTMM_NO_MIG)
+		if (htmm_mode == HTMM_NO_MIG){
+			printk("htmm no mig?!");
+			goto __keep_locked;
+		}
+		if (unlikely(!page_evictable(page))){
+			printk("page_evictable");
+			goto __keep_locked;
+		}
+		if (PageWriteback(page)){
+			printk("Writeback");
+			goto __keep_locked;
+		}
+		if (PageTransHuge(page) && !thp_migration_supported()){
+			printk("thp unsupport? %d", thp_migration_supported());
+			goto __keep_locked;
+		}
+	    	
+		SetPageActive(page);
+		//printk("ready promote page");
+		list_add(&page->lru, &promote_pages);
+		unlock_page(page);
+		continue;
+__keep_locked:
+		unlock_page(page);
+__keep:
+		printk("failed promote page");
+		list_add(&page->lru, &ret_pages);
+    }
+
+    nr_promoted = migrate_page_list(&promote_pages, pgdat, true);
+	
+    if (!list_empty(&promote_pages))
+		list_splice(&promote_pages, page_list);
+
+    list_splice(&ret_pages, page_list);
+    return nr_promoted;
 }

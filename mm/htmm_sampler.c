@@ -205,6 +205,8 @@ static int ksamplingd(void *data)
     unsigned long trace_cputime, trace_period = msecs_to_jiffies(1500); // 3s
     unsigned long trace_runtime;
 
+	const struct cpumask *cpumask;
+
 	 /* orig impl: see read_sum_exec_runtime() */
     trace_runtime = total_runtime = exec_runtime = t->se.sum_exec_runtime;
 
@@ -212,9 +214,16 @@ static int ksamplingd(void *data)
     sleep_timeout = usecs_to_jiffies(2000); //毫秒和秒是1000
 
 	 /* Currently uses a single CPU node(0) 就是说这个采样指针只允许cpu0的去使用, 进程access_sampling将只能在cpumask中指定的CPU上运行 */
-    const struct cpumask *cpumask = cpumask_of_node(0);
+    cpumask = cpumask_of_node(0);
     if (!cpumask_empty(cpumask))
 		do_set_cpus_allowed(access_sampling, cpumask);
+
+	LIST_HEAD(fast_list);
+	pg_data_t *pgdat = NODE_DATA(0);
+	struct mem_cgroup_per_node *pn = next_memcg_cand(pgdat); 
+	struct mem_cgroup *memcg = pn->memcg;
+	struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
+	struct list_head *src = &lruvec->lists[LRU_ACTIVE_ANON];
 
     while (!kthread_should_stop()) {
 		int cpu, event, cond = false;
@@ -292,7 +301,7 @@ static int ksamplingd(void *data)
 								break;
 			    			}
 
-							update_pginfo(he->pid, he->addr, event);
+							update_pginfo(he->pid, he->addr, event, &fast_list);
 							//TODO：这里打印确定是不是函数内部返回的就不是同一个参数。
 							// printk("next_hit_dram %d", atomic_read(&next_hit_dram));
 							// printk("next_hit_pm %d", atomic_read(&next_hit_pm));
@@ -317,38 +326,11 @@ static int ksamplingd(void *data)
 				} while (cond);	
 	    	}
 		}	
-
-		//TODO：这里打印可能有其他的跳出循环的问题。
-		
-		// if(next_hit_dram!=0 || next_hit_pm!=0){
-			
-			// atomic_add(atomic_read(&next_hit_dram), &hit_dram);
-			// atomic_add(atomic_read(&next_hit_pm), &hit_pm);
-			// printk("hit_dram %lu", hit_dram);
-			// printk("hit_pm %lu", hit_pm);
-		// atomic_set(&hit_dram, atomic_read(&hit_dram));
-		// atomic_set(&hit_pm, atomic_read(&hit_pm));
-		// trace_printk("hit_dram: %d", atomic_read(&hit_dram));
-		// trace_printk("hit_dram: %d", atomic_read(&hit_pm));
-			// if(atomic_read(&hit_dram) == 0){
-			// 	atomic_set(&hit_ratio, 0);
-			// }else if(atomic_read(&hit_dram) == 0){
-			// 	atomic_set(&hit_ratio, 100);
-			// }else{
-			// 	atomic_set(&hit_ratio, atomic_read(&hit_dram)*100 / (atomic_read(&hit_dram) + atomic_read(&hit_pm)));
-			// }
-
-		// atomic_set(&next_hit_dram, 0);
-		// atomic_set(&next_hit_pm, 0);
-		// }
 		
 		/* if ksampled_soft_cpu_quota is zero, disable dynamic pebs feature 这里应该是cpu消耗是0就不休眠*/
+
 		// if (!ksampled_soft_cpu_quota)
 	    // continue;
-
-		/* sleep 这确实是while中线程需要循环做的事情，
-		然后每次执行后需要休眠如果原本的定义不行可以采用msleep_interruptible(2000);*/
-		schedule_timeout_interruptible(sleep_timeout);
 
 		/* check elasped time */
 		cur = jiffies; // 是Linux内核中用于表示时间的基本单位
@@ -383,20 +365,11 @@ static int ksamplingd(void *data)
 			exec_runtime = cur_runtime;
 		}
 
-		trace_printk("sample_period: %lu || cputime: %lu \n",get_sample_period(sample_period), trace_cputime);
+		fast_promote(src, &fast_list, pgdat);
 
-		/* This is used for reporting the sample period and cputime */
-		if (cur - trace_cputime >= trace_period) {
-			u64 cur_runtime = t->se.sum_exec_runtime;
-			trace_runtime = cur_runtime - trace_runtime;
-			trace_cputime = jiffies_to_usecs(cur - trace_cputime);
-			trace_cputime = div64_u64(trace_runtime, trace_cputime);
-				
-			// trace_printk("sample_period: %lu || cputime: %lu \n",get_sample_period(sample_period), trace_cputime);
-				
-			trace_cputime = cur;
-			trace_runtime = cur_runtime;
-		}
+		/* sleep 这确实是while中线程需要循环做的事情，
+		然后每次执行后需要休眠如果原本的定义不行可以采用msleep_interruptible(2000);*/
+		schedule_timeout_interruptible(sleep_timeout);
     }
 
 

@@ -43,6 +43,7 @@
 #define pcount 30
 /* only prime numbers */
 static const unsigned int pebs_period_list[pcount] = {
+    99,      //19997,  // 20000 - max
     199,    // 200 - min
     293,    // 300
     401,    // 400
@@ -72,7 +73,6 @@ static const unsigned int pebs_period_list[pcount] = {
     13999,  // 14000
     16001,  // 16000
     17989,  // 18000
-    19997,  // 20000 - max
 };
 
 #define pinstcount 5
@@ -115,7 +115,7 @@ extern pginfo_t *get_compound_pginfo(struct page *page, unsigned long address);
 
 extern void set_lru_adjusting(struct mem_cgroup *memcg, bool inc_thres);
 
-extern void update_pginfo(pid_t pid, unsigned long address, enum events e);
+extern void update_pginfo(pid_t pid, unsigned long address, enum events e, struct list_head *fast_list);
 
 extern void move_page_to_active_lru(struct page *page);
 extern void move_page_to_inactive_lru(struct page *page);
@@ -126,6 +126,7 @@ extern unsigned int get_idx(unsigned long num);
 extern void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg);
 extern void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 extern void charge_htmm_page(struct page *page, struct mem_cgroup *memcg);
+
 
 /* htmm_sampler.c */
 extern int ksamplingd_init(pid_t pid, int node);
@@ -208,6 +209,8 @@ extern void kmigraterd_wakeup(int nid);
 extern int kmigraterd_init(void);
 extern void kmigraterd_stop(void);
 extern unsigned int nr_action;
+extern unsigned long fast_promote(struct list_head *page_list, struct list_head *fast_list, pg_data_t *pgdat);
+extern struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat);
 
 /*qtable.c*/
 // extern void get_best_action(unsigned int *nr_action);
