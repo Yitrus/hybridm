@@ -115,7 +115,7 @@ extern pginfo_t *get_compound_pginfo(struct page *page, unsigned long address);
 
 extern void set_lru_adjusting(struct mem_cgroup *memcg, bool inc_thres);
 
-extern void update_pginfo(pid_t pid, unsigned long address, enum events e, struct list_head *fast_list);
+extern void update_pginfo(pid_t pid, unsigned long address, enum events e);
 
 extern void move_page_to_active_lru(struct page *page);
 extern void move_page_to_inactive_lru(struct page *page);
@@ -209,8 +209,6 @@ extern void kmigraterd_wakeup(int nid);
 extern int kmigraterd_init(void);
 extern void kmigraterd_stop(void);
 extern unsigned int nr_action;
-extern unsigned long fast_promote(struct list_head *page_list, struct list_head *fast_list, pg_data_t *pgdat);
-extern struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat);
 
 /*qtable.c*/
 // extern void get_best_action(unsigned int *nr_action);

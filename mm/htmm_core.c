@@ -260,7 +260,7 @@ void move_page_to_active_lru(struct page *page)
     }
 
     if (!__isolate_lru_page_prepare(page, 0)){
-        printk("isolate_lru_page_prepare");
+        // printk("isolate_lru_page_prepare");
         goto lru_unlock;
     }
 
@@ -328,18 +328,10 @@ lru_unlock:
 	BUG();
 }
 
-static unsigned long add_fast_promote_list(struct page *page, struct list_head *fast_list){
-    list_del(&page->lru);
-    list_add(&page->lru, fast_list);
-}
-
 static void update_base_page(struct vm_area_struct *vma,
-	struct page *page, pginfo_t *pginfo, _Bool ifdram, struct list_head *fast_list)
+	struct page *page, pginfo_t *pginfo)
 {
-    // struct mem_cgroup *memcg = get_mem_cgroup_from_mm(vma->vm_mm);
-    // unsigned long prev_accessed, prev_idx, cur_idx;
     bool hot;
-
 
     // prev_accessed = pginfo->total_accesses; //以前被访问的次数？
     pginfo->nr_accesses++; //这次被访问的次数累计
@@ -348,10 +340,7 @@ static void update_base_page(struct vm_area_struct *vma,
     // prev_idx = get_idx(prev_accessed); //所在bins的位置
     // cur_idx = get_idx(pginfo->nr_accesses); //我可以用这个来提升在lru两部分的移动吧
 
-    if(pginfo->nr_accesses >= 2 && !ifdram){
-        add_fast_promote_list(page, fast_list);
-    }
-    else if(pginfo->nr_accesses >= 1){ //小页面元数据*512，12; 不乘以元数据后，采样本身就表示频率比较高，试试门槛为被采样到2次(2次效果不行，感觉被采样到就不容易了，试试都迁移走)
+    if(pginfo->nr_accesses >= 4){ //小页面元数据*512，12; 不乘以元数据后，采样本身就表示频率比较高，试试门槛为被采样到2次(2次效果不行，感觉被采样到就不容易了，试试都迁移走)
         hot = true;
     }else{
         hot = false;
@@ -374,12 +363,12 @@ static void update_base_page(struct vm_area_struct *vma,
 }
 // 前后这两个针对base和huge的页面是这次要改要做调整的主要函数
 static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
-	struct page *page, unsigned long address, _Bool ifdram, struct list_head *fast_list)
+	struct page *page, unsigned long address)
 {
     // struct mem_cgroup *memcg = get_mem_cgroup_from_mm(vma->vm_mm);
     struct page *meta_page;
     pginfo_t *pginfo;
-    unsigned long prev_idx, cur_idx;
+    // unsigned long prev_idx, cur_idx;
     bool hot, pg_split = false;
     unsigned long pginfo_prev;
 
@@ -412,10 +401,11 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
 
 
     // hot = cur_idx >= memcg->active_threshold;
-    if(meta_page->total_accesses >= 8 && !ifdram){
-        add_fast_promote_list(page, fast_list);
-    }
-    else if(meta_page->total_accesses >= 6){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
+    // if(meta_page->total_accesses >= 8 && !ifdram && PageAnon(page)){
+    //     add_fast_promote_list(page, fast_list);
+    // }
+    // else 
+    if(meta_page->total_accesses >= 16){ //没有被乘以元数据，但是面广，12可能太大了，先试试8
         hot = true;
     }else{
         hot = false;
@@ -441,12 +431,11 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
 }
 
 static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
-				unsigned long address, struct list_head *fast_list)
+				unsigned long address)
 {
     pte_t *pte, ptent;
     spinlock_t *ptl;
     pginfo_t *pginfo;
-    _Bool ifdram;
     struct page *page, *pte_page;
     int ret = 0;
     unsigned long tmp_addr;
@@ -474,22 +463,13 @@ static int __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
     tmp_addr = page_to_phys(page);
     if(tmp_addr <= DRAM_ADDR_END){
         atomic_inc(&hit_dram);
-        // if(atomic_read(&hit_dram)%17==1){
-        //     trace_printk("pmd_next_hit_dram %d \n", atomic_read(&hit_dram));
-        // }
-        ifdram = true;
     }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
         atomic_inc(&hit_pm);
-        // if(atomic_read(&hit_pm)%17==1){
-        //     trace_printk("pmd_next_pm_pm %d \n", atomic_read(&hit_pm));
-        // }
-        ifdram = false;
     }else{
         atomic_inc(&hit_other);
-        ifdram = false;
     }
 
-    update_base_page(vma, page, pginfo, ifdram, fast_list);
+    update_base_page(vma, page, pginfo);
     pte_unmap_unlock(pte, ptl);
     if (htmm_cxl_mode) {
 	if (page_to_nid(page) == 0)
@@ -510,12 +490,11 @@ pte_unlock:
 }
 
 static int __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
-				unsigned long address, struct list_head *fast_list)
+				unsigned long address)
 {
     pmd_t *pmd, pmdval;
     bool ret = 0;
     unsigned long tmp_addr;
-    _Bool ifdram;
     pmd = pmd_offset(pud, address);
     if (!pmd || pmd_none(*pmd)){
         printk("__update_pmd_pginfo !pmd || pmd_none(*pmd)");
@@ -523,7 +502,7 @@ static int __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
     }
 	
     if (is_swap_pmd(*pmd)){
-        printk("__update_pmd_pginfo is_swap_pmd(*pmd)");
+        // printk("__update_pmd_pginfo is_swap_pmd(*pmd)");
         return ret;
     }
 	
@@ -558,22 +537,13 @@ static int __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
         // hit_total += 1;
         if(tmp_addr <= DRAM_ADDR_END){
             atomic_inc(&hit_dram);
-            // if(atomic_read(&hit_dram)%17==1){
-            //     trace_printk("pmd_next_hit_dram %d \n", atomic_read(&hit_dram));
-            // }
-            ifdram = true;
         }else if(tmp_addr>=PM_ADDR_START && tmp_addr<=PM_ADDR_END){
             atomic_inc(&hit_pm);
-            // if(atomic_read(&hit_pm)%17==1){
-            //     trace_printk("pmd_next_pm_pm %d \n", atomic_read(&hit_pm));
-            // }
-            ifdram = false;
         }else{
             atomic_inc(&hit_other);
-            ifdram = false;
         }
 
-        update_huge_page(vma, pmd, page, address, ifdram, fast_list);
+        update_huge_page(vma, pmd, page, address);
         if (htmm_cxl_mode) {
             if (page_to_nid(page) == 0)
             return 1;
@@ -591,10 +561,10 @@ static int __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
     }
 
     /* base page */
-    return __update_pte_pginfo(vma, pmd, address, fast_list);
+    return __update_pte_pginfo(vma, pmd, address);
 }
 // 
-static int __update_pginfo(struct vm_area_struct *vma, unsigned long address, struct list_head *fast_list)
+static int __update_pginfo(struct vm_area_struct *vma, unsigned long address)
 {
     pgd_t *pgd;
     p4d_t *p4d;
@@ -618,7 +588,7 @@ static int __update_pginfo(struct vm_area_struct *vma, unsigned long address, st
         return 0;
     }
     
-    return __update_pmd_pginfo(vma, pud, address, fast_list);
+    return __update_pmd_pginfo(vma, pud, address);
 }
 
 /* protected by memcg->access_lock 这个是统计直方图用的，但是active和inactive的阈值没定，如果设置一个的话，可能会用到*/
@@ -638,7 +608,7 @@ static int __update_pginfo(struct vm_area_struct *vma, unsigned long address, st
 //     memcg->num_util = 0;
 // }
 
-void update_pginfo(pid_t pid, unsigned long address, enum events e, struct list_head *fast_list)
+void update_pginfo(pid_t pid, unsigned long address, enum events e)
 {
     struct pid *pid_struct = find_get_pid(pid);
     struct task_struct *p = pid_struct ? pid_task(pid_struct, PIDTYPE_PID) : NULL;
@@ -672,7 +642,7 @@ void update_pginfo(pid_t pid, unsigned long address, enum events e, struct list_
 		
     if (!vma->vm_mm || !vma_migratable(vma) ||
 	(vma->vm_file && (vma->vm_flags & (VM_READ | VM_WRITE)) == (VM_READ))){
-        printk("update pginfo !vma_migratable");
+        // printk("update pginfo !vma_migratable");
         goto mmap_unlock;
     }
 		
@@ -683,7 +653,7 @@ void update_pginfo(pid_t pid, unsigned long address, enum events e, struct list_
     }
     
     /* increase sample counts only for valid records */
-    ret = __update_pginfo(vma, address, fast_list);
+    ret = __update_pginfo(vma, address);
 
 mmap_unlock:
     mmap_read_unlock(mm);

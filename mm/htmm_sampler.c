@@ -218,13 +218,6 @@ static int ksamplingd(void *data)
     if (!cpumask_empty(cpumask))
 		do_set_cpus_allowed(access_sampling, cpumask);
 
-	LIST_HEAD(fast_list);
-	pg_data_t *pgdat = NODE_DATA(0);
-	struct mem_cgroup_per_node *pn = next_memcg_cand(pgdat); 
-	struct mem_cgroup *memcg = pn->memcg;
-	struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
-	struct list_head *src = &lruvec->lists[LRU_ACTIVE_ANON];
-
     while (!kthread_should_stop()) {
 		int cpu, event, cond = false;
     
@@ -301,7 +294,7 @@ static int ksamplingd(void *data)
 								break;
 			    			}
 
-							update_pginfo(he->pid, he->addr, event, &fast_list);
+							update_pginfo(he->pid, he->addr, event);
 							//TODO：这里打印确定是不是函数内部返回的就不是同一个参数。
 							// printk("next_hit_dram %d", atomic_read(&next_hit_dram));
 							// printk("next_hit_pm %d", atomic_read(&next_hit_pm));
@@ -329,8 +322,12 @@ static int ksamplingd(void *data)
 		
 		/* if ksampled_soft_cpu_quota is zero, disable dynamic pebs feature 这里应该是cpu消耗是0就不休眠*/
 
-		// if (!ksampled_soft_cpu_quota)
-	    // continue;
+		if (!ksampled_soft_cpu_quota)
+	    continue;
+
+		/* sleep 这确实是while中线程需要循环做的事情，
+		然后每次执行后需要休眠如果原本的定义不行可以采用msleep_interruptible(2000);*/
+		schedule_timeout_interruptible(sleep_timeout);
 
 		/* check elasped time */
 		cur = jiffies; // 是Linux内核中用于表示时间的基本单位
@@ -364,12 +361,6 @@ static int ksamplingd(void *data)
 			elapsed_cputime = cur;
 			exec_runtime = cur_runtime;
 		}
-
-		fast_promote(src, &fast_list, pgdat);
-
-		/* sleep 这确实是while中线程需要循环做的事情，
-		然后每次执行后需要休眠如果原本的定义不行可以采用msleep_interruptible(2000);*/
-		schedule_timeout_interruptible(sleep_timeout);
     }
 
 
