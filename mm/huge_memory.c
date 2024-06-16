@@ -1622,9 +1622,9 @@ int zap_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 
 		if (pmd_present(orig_pmd)) {
 			page = pmd_page(orig_pmd);
-// #ifdef CONFIG_HTMM
-// 			uncharge_htmm_page(page, get_mem_cgroup_from_mm(vma->vm_mm));
-// #endif
+#ifdef CONFIG_HTMM
+			uncharge_htmm_page(page, get_mem_cgroup_from_mm(vma->vm_mm));
+#endif
 			page_remove_rmap(page, true);
 			VM_BUG_ON_PAGE(page_mapcount(page) < 0, page);
 			VM_BUG_ON_PAGE(!PageHead(page), page);
@@ -2140,8 +2140,19 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 
 		pte_pginfo->nr_accesses = tail_pginfo->nr_accesses;
 		pte_pginfo->total_accesses = tail_pginfo->total_accesses;
-		//__split_huge_pmd_locked 看起来是对大页拆分为小页的修改，但是要不要页面active应该无所谓吧？
-		SetPageActive(&page[i]);
+		pte_pginfo->cooling_clock = tail_pginfo->cooling_clock;
+		
+		if (get_idx(pte_pginfo->total_accesses) >= (memcg->active_threshold - 1))
+		    SetPageActive(&page[i]);
+		else
+		    ClearPageActive(&page[i]);
+
+		spin_lock(&memcg->access_lock);
+		memcg->hotness_hg[get_idx(pte_pginfo->total_accesses)]++;
+		spin_unlock(&memcg->access_lock);
+		/* Htmm flag will be cleared later */
+		/* ClearPageHtmm(&page[i]); */
+		//改这段有些犹豫，不过遵循他降温的逻辑吧
 	    }
 	}
 skip_copy_pginfo:
@@ -2381,13 +2392,13 @@ static void __split_huge_page_tail(struct page *head, int tail,
 		struct lruvec *lruvec, struct list_head *list)
 {
 	struct page *page_tail = head + tail;
-// #ifdef CONFIG_HTMM
-// 	bool htmm_tail = PageHtmm(page_tail) ? true : false;
-// 	bool htmm_active_tail = PageHtmm(head) && PageActive(page_tail);
-// #else
-// 	bool htmm_tail = false;
-// 	bool htmm_active_tail = false;
-// #endif
+#ifdef CONFIG_HTMM
+	bool htmm_tail = PageHtmm(page_tail) ? true : false;
+	bool htmm_active_tail = PageHtmm(head) && PageActive(page_tail);
+#else
+	bool htmm_tail = false;
+	bool htmm_active_tail = false;
+#endif
 	VM_BUG_ON_PAGE(atomic_read(&page_tail->_mapcount) != -1, page_tail);
 
 	/*
@@ -2410,20 +2421,23 @@ static void __split_huge_page_tail(struct page *head, int tail,
 #ifdef CONFIG_64BIT
 			 (1L << PG_arch_2) |
 #endif
+#ifdef CONFIG_HTMM
+			// (1L << PG_htmm) |
+#endif
 			 (1L << PG_dirty)));
 
 	/* ->mapping in first tail page is compound_mapcount */
 	//VM_BUG_ON_PAGE(tail > 2 && !PageHtmm(head) && !htmm_tail && page_tail->mapping != TAIL_MAPPING,
 //			page_tail);
 
-// #ifdef CONFIG_HTMM
-// 	if (htmm_tail)
-// 	    clear_transhuge_pginfo(page_tail);
-// 	if (htmm_active_tail)
-// 	    SetPageActive(page_tail);
-// 	else
-// 	    ClearPageActive(page_tail);
-// #endif
+#ifdef CONFIG_HTMM
+	if (htmm_tail)
+	    clear_transhuge_pginfo(page_tail);
+	if (htmm_active_tail)
+	    SetPageActive(page_tail);
+	else
+	    ClearPageActive(page_tail);
+#endif
 	page_tail->mapping = head->mapping;
 	page_tail->index = head->index + tail;
 
@@ -2548,17 +2562,17 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 		 * tail page was concurrently zapped. Then we can safely free it
 		 * and save page reclaim or migration the trouble of trying it.
 		 */
-		// if (list && page_ref_freeze(subpage, 2)) {
-		//     VM_BUG_ON_PAGE(PageLRU(subpage), subpage);
-		//     VM_BUG_ON_PAGE(PageCompound(subpage), subpage);
-		//     VM_BUG_ON_PAGE(page_mapped(subpage), subpage);
+		if (list && page_ref_freeze(subpage, 2)) {
+		    VM_BUG_ON_PAGE(PageLRU(subpage), subpage);
+		    VM_BUG_ON_PAGE(PageCompound(subpage), subpage);
+		    VM_BUG_ON_PAGE(page_mapped(subpage), subpage);
 
-		//     ClearPageActive(subpage);
-		//     ClearPageUnevictable(subpage);
-		//     list_move(&subpage->lru, &pages_to_free);
-		//     nr_pages_to_free++;
-		//     continue;
-		// }
+		    ClearPageActive(subpage);
+		    ClearPageUnevictable(subpage);
+		    list_move(&subpage->lru, &pages_to_free);
+		    nr_pages_to_free++;
+		    continue;
+		}
 
 		/*
 		 * If a tail page has only one reference left, it will be freed
@@ -2566,8 +2580,8 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 		 * subpages are no longer remapped, there will only be one
 		 * reference left in cases outside of reclaim or migration.
 		 */
-		// if (page_ref_count(subpage) == 1)
-		//     nr_pages_to_free++;
+		if (page_ref_count(subpage) == 1)
+		    nr_pages_to_free++;
 
 		/*
 		 * Subpages may be freed if there wasn't any mapping
@@ -2579,11 +2593,11 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 		put_page(subpage);
 	}
 
-	// if (!nr_pages_to_free)
-	//     return;
+	if (!nr_pages_to_free)
+	    return;
 
-	// mem_cgroup_uncharge_list(&pages_to_free);
-	// free_unref_page_list(&pages_to_free);
+	mem_cgroup_uncharge_list(&pages_to_free);
+	free_unref_page_list(&pages_to_free);
 }
 
 int total_mapcount(struct page *page)
@@ -2804,6 +2818,22 @@ int split_huge_page_to_list(struct page *page, struct list_head *list)
 				filemap_nr_thps_dec(mapping);
 			}
 		}
+#ifdef CONFIG_HTMM
+		{
+		    struct mem_cgroup *memcg = page_memcg(head);
+		    unsigned int idx;
+
+		    spin_lock(&memcg->access_lock);
+		    idx = head[3].idx;
+
+		    if (memcg->hotness_hg[idx] < HPAGE_PMD_NR)
+			memcg->hotness_hg[idx] = 0;
+		    else
+			memcg->hotness_hg[idx] -= HPAGE_PMD_NR;
+
+		    spin_unlock(&memcg->access_lock);
+		}
+#endif
 		__split_huge_page(page, list, end);
 		ret = 0;
 	} else {
@@ -2812,6 +2842,20 @@ fail:
 		if (mapping)
 			xa_unlock(&mapping->i_pages);
 		local_irq_enable();
+		remap_page(head, thp_nr_pages(head), false);
+#if 0 //def CONFIG_HTMM
+		{
+		    struct mem_cgroup *memcg = page_memcg(head);
+		    if (memcg->htmm_enabled) {
+			spin_lock(&ds_queue->split_queue_lock);
+			if (!list_empty(page_deferred_list(head))) {
+			    ds_queue->split_queue_len--;
+			    list_del(page_deferred_list(head));
+			}
+			spin_unlock(&ds_queue->split_queue_lock);
+		    }
+		}
+#endif
 		ret = -EBUSY;
 	}
 
@@ -3293,6 +3337,11 @@ void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct page *new)
 	else
 		page_add_file_rmap(new, true);
 	set_pmd_at(mm, mmun_start, pvmw->pmd, pmde);
+#ifdef CONFIG_HTMM
+	{
+	    check_transhuge_cooling(NULL, new, true);
+	}
+#endif
 	if ((vma->vm_flags & VM_LOCKED) && !PageDoubleMap(new))
 		mlock_vma_page(new);
 	update_mmu_cache_pmd(vma, address, pvmw->pmd);

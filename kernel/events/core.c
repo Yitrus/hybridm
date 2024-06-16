@@ -12515,7 +12515,6 @@ SYSCALL_DEFINE1(htmm_end,
 SYSCALL_DEFINE2(htmm_start,
 		pid_t, pid, int, node)
 {
-	printk("in system call ksamplingd init");
     ksamplingd_init(pid, node);
     return 0;
 }
@@ -12593,7 +12592,6 @@ int htmm__perf_event_open(struct perf_event_attr *attr_ptr, pid_t pid,
 	/* Do we allow access to perf_event_open(2) ? */
 	err = security_perf_event_open(&attr, PERF_SECURITY_OPEN);
 	if (err){
-		printk("[htmm__perf_event_open] not allowed access to perf_event_open(2)");
 		return err;
 	}
 		
@@ -12606,7 +12604,6 @@ int htmm__perf_event_open(struct perf_event_attr *attr_ptr, pid_t pid,
 	if (!attr.exclude_kernel) {
 		err = perf_allow_kernel(&attr);
 		if (err){
-			printk("[htmm__perf_event_open] not allowed attr");
 			return err;
 		}	
 	}
@@ -12628,7 +12625,6 @@ int htmm__perf_event_open(struct perf_event_attr *attr_ptr, pid_t pid,
 	if ((attr.sample_type & PERF_SAMPLE_PHYS_ADDR)) {
 		err = perf_allow_kernel(&attr);
 		if (err){
-			printk("[htmm__perf_event_open] not allowed attr.sample_type 1");
 			return err;
 		}
 			
@@ -12638,7 +12634,6 @@ int htmm__perf_event_open(struct perf_event_attr *attr_ptr, pid_t pid,
 	if (attr.sample_type & PERF_SAMPLE_REGS_INTR) {
 		err = security_locked_down(LOCKDOWN_PERF);
 		if (err){
-			printk("[htmm__perf_event_open] not allowed attr.sample_type 2");
 			return err;
 		}
 	}

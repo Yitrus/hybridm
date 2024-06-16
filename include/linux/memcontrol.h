@@ -144,6 +144,10 @@ struct mem_cgroup_per_node {
 #ifdef CONFIG_HTMM /* struct mem_cgroup_per_node */
 	unsigned long		max_nr_base_pages; /* Set by "max_at_node" param */
 	struct list_head	kmigraterd_list;
+	bool			need_cooling;
+	bool			need_adjusting;
+	bool			need_adjusting_all;
+	bool			need_demotion;
 	struct list_head	deferred_list; //推迟的list？干啥的？
 #endif
 	struct mem_cgroup_reclaim_iter	iter;
@@ -354,8 +358,35 @@ struct mem_cgroup {
 #ifdef CONFIG_HTMM /* struct mem_cgroup */
 	bool htmm_enabled;
 	unsigned long max_nr_dram_pages; /* the maximum number of pages */
-	/* etc */
+	unsigned long nr_active_pages; /* updated by need_lru_cooling() */
+	/* stat for sampled accesses */
+	unsigned long nr_sampled; /* the total number of sampled accesses */
+	unsigned long nr_dram_sampled; /* accesses to DRAM: n(i) */
+	unsigned long prev_dram_sampled; /* accesses to DRAM n(i-1) */
+	unsigned long max_dram_sampled; /* accesses to DRAM (estimated) */
+	unsigned long prev_max_dram_sampled; /* accesses to DRAM (estimated) */
+	unsigned long nr_max_sampled; /* the calibrated number of accesses to both DRAM and NVM */
+	/* thresholds */
+	unsigned int active_threshold; /* hot */
+	unsigned int warm_threshold;
+	unsigned int bp_active_threshold; /* expected threshold */
+	/* used to calculated avg_samples_hp. see check_transhuge_cooling() */
+	unsigned int sum_util;
+	unsigned int num_util;
+	/*  */
 	unsigned long access_map[21];
+	/* histograms. exponential scale */
+	/* "hotness_map" is used to determine the hot page threshold.
+	 * "ebp_hotness_map" is used to accurately determine
+	 * the expected DRAM hit ratio when the system only uses 4KB (base) pages.
+	 */
+	unsigned long hotness_hg[16]; // page access histogram
+	unsigned long ebp_hotness_hg[16]; // expected bage page
+	/* lock for histogram */
+	spinlock_t access_lock;
+	/* etc */
+	bool cooled;
+	unsigned int cooling_clock;
 	unsigned long nr_alloc;
 #endif /* CONFIG_HTMM */
 	struct mem_cgroup_per_node *nodeinfo[];

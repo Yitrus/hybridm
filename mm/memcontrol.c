@@ -5130,6 +5130,10 @@ static int alloc_mem_cgroup_per_node_info(struct mem_cgroup *memcg, int node)
 #ifdef CONFIG_HTMM /* alloc_mem_cgroup_per_node_info() */
 	pn->max_nr_base_pages = ULONG_MAX;
 	INIT_LIST_HEAD(&pn->kmigraterd_list);
+	pn->need_cooling = false;
+	pn->need_adjusting = false;
+	pn->need_adjusting_all = false;
+	pn->need_demotion = false;
 	INIT_LIST_HEAD(&pn->deferred_list); // 还不知道这个推迟链表是干什么的
 #endif
 
@@ -5229,9 +5233,28 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 #ifdef CONFIG_HTMM /* mem_cgroup_alloc() */
 	memcg->htmm_enabled = false;
 	memcg->max_nr_dram_pages = ULONG_MAX;
+	memcg->nr_active_pages = 0;
+	memcg->nr_sampled = 0;
+	memcg->nr_dram_sampled = 0;
+	memcg->prev_dram_sampled = 0;
+	memcg->max_dram_sampled = 0;
+	memcg->prev_max_dram_sampled = 0;
+	memcg->nr_max_sampled = 0;
+	/* thresholds */
+	memcg->active_threshold = htmm_thres_hot;
+	memcg->warm_threshold = htmm_thres_hot;
+	memcg->bp_active_threshold = htmm_thres_hot;
 
 	for (i = 0; i < 21; i++)
 	    memcg->access_map[i] = 0;
+	for (i = 0; i < 16; i++) {
+	    memcg->hotness_hg[i] = 0;
+	    memcg->ebp_hotness_hg[i] = 0;
+	}
+
+	spin_lock_init(&memcg->access_lock);
+	memcg->cooled = false;
+	memcg->cooling_clock = 0;
 	memcg->nr_alloc = 0;
 #endif
 	idr_replace(&mem_cgroup_idr, memcg, memcg->id.id);

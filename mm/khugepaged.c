@@ -1330,8 +1330,8 @@ static int khugepaged_scan_pmd(struct mm_struct *mm,
 		    if (!pginfo)
 			goto out_unmap;
 		    
-		    // if (!pginfo->may_hot)
-			// goto out_unmap;
+		    if (!pginfo->may_hot)
+			goto out_unmap;
 		}
 #endif
 		page = vm_normal_page(vma, _address, pteval);

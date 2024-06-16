@@ -2110,7 +2110,7 @@ struct page *alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 	    struct mem_cgroup *memcg = mem_cgroup_from_task(p);
 	    unsigned long max_nr_pages;
 	    int nid = pol->mode == MPOL_PREFERRED ? first_node(pol->nodes) : node;
-	    //int orig_nid = nid;
+	    int orig_nid = nid;
 	    unsigned int nr_pages = 1U << order;
 	    pg_data_t *pgdat = NODE_DATA(nid);
 	    
@@ -2137,16 +2137,16 @@ struct page *alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 
 	    //nid = orig_nid;
 
-	    // if (orig_nid != nid) { 
-		// 	//就是说现在要换节点了
-		// WRITE_ONCE(memcg->nodeinfo[orig_nid]->need_demotion, true);
-		// kmigraterd_wakeup(orig_nid);
-	    // }
-	    // else if (max_nr_pages <= (get_nr_lru_pages_node(memcg, pgdat) +
-		// 	get_memcg_demotion_watermark(max_nr_pages))) {
-		// WRITE_ONCE(memcg->nodeinfo[nid]->need_demotion, true);
-		// kmigraterd_wakeup(nid);
-	    // }
+	    if (orig_nid != nid) { 
+			//就是说现在要换节点了
+		WRITE_ONCE(memcg->nodeinfo[orig_nid]->need_demotion, true);
+		kmigraterd_wakeup(orig_nid);
+	    }
+	    else if (max_nr_pages <= (get_nr_lru_pages_node(memcg, pgdat) +
+			get_memcg_demotion_watermark(max_nr_pages))) {
+		WRITE_ONCE(memcg->nodeinfo[nid]->need_demotion, true);
+		kmigraterd_wakeup(nid);
+	    }
 	    
 	    mpol_cond_put(pol);
 	    page = __alloc_pages_node(nid, gfp | __GFP_THISNODE, order);
@@ -3039,7 +3039,7 @@ unsigned int htmm_split_period = 2; /* used to shift the wss of memcg */
 unsigned int ksampled_min_sample_ratio = 50; // 50%
 unsigned int ksampled_max_sample_ratio = 10; // 10%
 unsigned int htmm_demotion_period_in_ms = 2000;
-unsigned int htmm_promotion_period_in_ms = 30000;
+unsigned int htmm_promotion_period_in_ms = 2000;
 unsigned int htmm_thres_split = 2; 
 unsigned int htmm_nowarm = 0; // enabled: 0, disabled: 1
 unsigned int htmm_util_weight = 10; // no impact (unused)

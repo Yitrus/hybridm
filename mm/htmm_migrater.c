@@ -77,7 +77,7 @@ void del_memcg_from_kmigraterd(struct mem_cgroup *memcg, int nid)
 	return;
 
     spin_lock(&pgdat->kmigraterd_lock);
-	printk("----------del memcg from kmigraterd----------");
+	// printk("----------del memcg from kmigraterd----------");
     list_for_each_entry(mz, &pgdat->kmigraterd_head, kmigraterd_list) {
 		if (mz == pn) {
 			list_del(&pn->kmigraterd_list);
@@ -85,7 +85,7 @@ void del_memcg_from_kmigraterd(struct mem_cgroup *memcg, int nid)
 		}
     }
     spin_unlock(&pgdat->kmigraterd_lock);
-	printk("----------del memcg from kmigraterd unlock----------");
+	// printk("----------del memcg from kmigraterd unlock----------");
 }
 
 //这个返回的是DRAM要保留的水印，如果剩下的页面数量比这个小就要迁移了
@@ -135,14 +135,14 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
 
 	lruvec = mem_cgroup_lruvec(memcg, pgdat); 
 	
-	if(lruvec == NULL){
-		printk("lruvec is null");
-	}
+	// if(lruvec == NULL){
+	// 	printk("lruvec is null");
+	// }
     lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
     
     if (htmm_mode == HTMM_NO_MIG){
 		//降级的时候咋没判断这个
-		printk("htmm_mode == %d", htmm_mode);
+		// printk("htmm_mode == %d", htmm_mode);
 		return 0;
 	}
 
@@ -279,18 +279,18 @@ static unsigned long isolate_lru_pages_promotion(unsigned long nr_to_scan,
 
 		if (!__isolate_lru_page_prepare(page, 0)) {
 	    	list_move(&page->lru, src);
-			printk("isolate failed lru_page_prepare");
+			// printk("isolate failed lru_page_prepare");
 	    	continue;
 		}
 		if (unlikely(!get_page_unless_zero(page))) {
 	    	list_move(&page->lru, src);
-			printk("isolate failed page_unless_zero");
+			// printk("isolate failed page_unless_zero");
 	    	continue;
 		}
 		if (!TestClearPageLRU(page)) {
 	    	put_page(page);
 	    	list_move(&page->lru, src);
-			printk("isolate failed TestClearPageLRU");
+			// printk("isolate failed TestClearPageLRU");
 	    	continue;
 		}
 
@@ -349,12 +349,12 @@ static unsigned long migrate_page_list(struct list_head *migrate_list,
 		target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
 
     if (list_empty(migrate_list)){
-		printk("migrate_page_list empty and over");
+		// printk("migrate_page_list empty and over");
 		return 0;
 	}
 
     if (target_nid == NUMA_NO_NODE){
-		printk("promotion target_nid %d == NUMA_NO_NODE over", target_nid);
+		// printk("promotion target_nid %d == NUMA_NO_NODE over", target_nid);
 		return 0;
 	}
 		
@@ -437,24 +437,24 @@ static unsigned long promote_page_list(struct list_head *page_list,
 		list_del(&page->lru);
 	
 		if (!trylock_page(page)){
-			printk("locked!");
+			// printk("locked!");
 			goto __keep;
 		}
 		//if (!PageActive(page) && htmm_mode != HTMM_NO_MIG)
 		if (htmm_mode == HTMM_NO_MIG){
-			printk("htmm no mig?!");
+			// printk("htmm no mig?!");
 			goto __keep_locked;
 		}
 		if (unlikely(!page_evictable(page))){
-			printk("page_evictable");
+			// printk("page_evictable");
 			goto __keep_locked;
 		}
 		if (PageWriteback(page)){
-			printk("Writeback");
+			// printk("Writeback");
 			goto __keep_locked;
 		}
 		if (PageTransHuge(page) && !thp_migration_supported()){
-			printk("thp unsupport? %d", thp_migration_supported());
+			// printk("thp unsupport? %d", thp_migration_supported());
 			goto __keep_locked;
 		}
 	    	
@@ -467,7 +467,7 @@ static unsigned long promote_page_list(struct list_head *page_list,
 __keep_locked:
 		unlock_page(page);
 __keep:
-		printk("failed promote page");
+		// printk("failed promote page");
 		//大部分页面加入这个链表了，都没办法迁移。
 		list_add(&page->lru, &ret_pages);
     }
@@ -611,7 +611,7 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
     enum lru_list lru;
     bool shrink_active = false;
 
-	unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
+	// unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
 
     for_each_evictable_lru(lru) {
 		if (!is_file_lru(lru) && is_active_lru(lru))
@@ -625,11 +625,11 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
     if (nr_exceeded > nr_evictable_pages)
 		shrink_active = true;
 
-    lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
-	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
-	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
-	trace_printk("BEFORE the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld\n", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+    // lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	// lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	// file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	// file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	// trace_printk("BEFORE the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld\n", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 
     do {
 		nr_reclaimed += demote_lruvec(nr_to_reclaim - nr_reclaimed, priority,
@@ -639,11 +639,11 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 		priority--;
     } while (priority);
 
-	lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
-	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
-	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
-	trace_printk("AFTER the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld\n", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+	// lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	// lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	// file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	// file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	// trace_printk("AFTER the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld\n", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 
     return nr_reclaimed;
 }
@@ -655,15 +655,15 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
     enum lru_list lru = LRU_ACTIVE_ANON;
     short priority = DEF_PRIORITY;
 
-	unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
+	// unsigned long lruvec_size, lruvec_inactive_size, file_active, file_inactive;
 
 	nr_to_promote = (unsigned long)nr_action;
 
-	lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
-	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
-	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
-	trace_printk("PM NODE BEFORE the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld\n", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+	// lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	// lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	// file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	// file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	// trace_printk("PM NODE BEFORE the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld\n", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 
     do {
 		nr_promoted += promote_lruvec(nr_to_promote, priority, pgdat, lruvec, lru);
@@ -683,11 +683,11 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
     	} while (priority);
 	}
 
-	lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
-	lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
-	file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
-	file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
-	trace_printk("PM NODE AFTER the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld\n", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
+	// lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+	// lruvec_inactive_size = lruvec_lru_size(lruvec, LRU_INACTIVE_ANON, MAX_NR_ZONES);
+	// file_active = lruvec_lru_size(lruvec, LRU_INACTIVE_FILE, MAX_NR_ZONES);
+	// file_inactive = lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES);
+	// trace_printk("PM NODE AFTER the lru mesg active_anon %lu inactive_anon %ld active_file %ld inactive_file %ld\n", lruvec_size, lruvec_inactive_size, file_active, file_inactive);
 
     return nr_promoted;
 }
@@ -737,7 +737,7 @@ static int kmigraterd(void *p)
     int nid = pgdat->node_id;
 	pg_data_t *pgdat2 = NODE_DATA(next_demotion_node(nid));
 	if(pgdat == NULL || pgdat2==NULL){
-		printk("kmigrated pgdat one is NULL");
+		// printk("kmigrated pgdat one is NULL");
 		kmigraterd_stop();
 	}
 
@@ -818,12 +818,12 @@ static void kmigraterd_run(int nid)
     pg_data_t *pgdat = NODE_DATA(nid);
 	pg_data_t *pgdat2 = NODE_DATA((next_demotion_node(nid)));
     if (!pgdat || pgdat->kmigraterd){
-		printk("node DRAM struct null");
+		// printk("node DRAM struct null");
 		return;
 	}
 
 	if (!pgdat2 || pgdat2->kmigraterd){
-		printk("node PM struct null");
+		// printk("node PM struct null");
 		return;
 	}
 		
@@ -831,7 +831,7 @@ static void kmigraterd_run(int nid)
 
     pgdat->kmigraterd = kthread_run(kmigraterd, pgdat, "kmigraterd%d", nid);
 	if(pgdat->kmigraterd == NULL){
-		printk("node DRAM kmigraterd NULL");
+		// printk("node DRAM kmigraterd NULL");
 	}else{
 		pgdat2->kmigraterd = pgdat->kmigraterd;
 	}
